@@ -28,6 +28,7 @@ integration URL avoids relying on ambiguous registry platform support.
 
 - `src/main.cpp`: cooperative application entry point; no clock behavior yet.
 - `src/hardware.cpp` and `include/hardware.hpp`: UART and input initialization.
+- `src/pd2200.cpp` and `include/pd2200.hpp`: initial Noritake VFD bring-up.
 - `include/pins.hpp`: single source of truth for the GPIO contract.
 - `include/clock_state.hpp`: UTC snapshot, initially invalid and unlocked.
 - `lib/`: future reusable C++ components; `test/`: future behavioral tests.
@@ -40,9 +41,16 @@ correct pulse and handle validity, signal loss and leap seconds before claiming
 synchronization. Canonical time stays UTC; any local-time formatting belongs at
 the display boundary. There is no timing-accuracy claim in this scaffold.
 
-The display module will encode Posiflex PD-2200 commands in **Noritake mode**
-and send them over UART1 through the MAX3232. No display commands are sent yet.
-Select Noritake mode on the actual display. Future ESP32 integration receives
+The display module sends Posiflex PD-2200 commands in **Noritake mode**
+over UART1 through the MAX3232. Select Noritake mode and 9600 baud, 8N1 on the
+actual display. Startup waits 500 ms, sends reset (`ESC I`), waits 100 ms,
+disables the cursor (`16` hex), sets minimum brightness (`1B 4C 3F` hex),
+then clears (`0E` hex) and homes (`0C` hex). Direct cursor positioning
+(`ESC H 00` / `ESC H 14`, addresses in hex) precedes each 20-byte row:
+`ABSURD CLOCK        ` and `PICO 2 ONLINE       `. Compile-time checks enforce
+the row lengths; no terminators or newlines are sent to the VFD. USB Serial
+reports when transmission completes, without waiting for a USB host.
+Future ESP32 integration receives
 UTC/time status over SPI1 plus a TIME_SYNC boundary output; protocol, SPI role,
 pulse width and IRQ direction remain to be specified. No ESP32/NTP code yet.
 
