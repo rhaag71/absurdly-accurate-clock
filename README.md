@@ -54,6 +54,29 @@ Future ESP32 integration receives
 UTC/time status over SPI1 plus a TIME_SYNC boundary output; protocol, SPI role,
 pulse width and IRQ direction remain to be specified. No ESP32/NTP code yet.
 
+## Verified VFD wiring
+
+Bench testing verified Pico 2 GP4 (physical pin 6) UART TX at 9600 baud on an
+oscilloscope using continuous `0x55` (ASCII `U`). The VFD then successfully
+displayed those characters through the MAX3232 with the wiring below.
+
+The tested MAX3232 module has misleading signal-direction labels: connect
+**Pico GP4 TX to the module header labeled TXD, not RXD**. GP4 remains the
+project's VFD UART TX pin; the module labeling does not change the GPIO contract.
+
+| Source | Destination |
+| --- | --- |
+| Pico GP4 / physical pin 6 | MAX3232 TTL header labeled TXD |
+| Pico GND | MAX3232 GND |
+| MAX3232 DB9 pin 2 (RS-232 transmit output) | Posiflex DB9 pin 3 (receive input) |
+| MAX3232 DB9 pin 5 | Posiflex DB9 pin 5 (signal ground) |
+
+The **DB9 pin 2 to pin 3 crossover is required** for this tested module/display
+combination. The PD-2200 is powered separately and configured for Noritake mode,
+9600 baud, 8N1. These labeling and wiring findings apply to the tested module.
+The temporary continuous-`U` diagnostic firmware has been removed; normal
+firmware sends the two startup rows described above.
+
 ## GPIO contract
 
 All numbers below are GPIO numbers, not physical header positions. TX/RX and
