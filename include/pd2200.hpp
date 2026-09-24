@@ -14,6 +14,9 @@ public:
     // Sends only the 20 characters, never the terminator or a newline.
     void writeRow(uint8_t row, const char (&text)[columns + 1]);
 
+    // Direct-position update using the same ESC H addressing as writeRow.
+    void writeChar(uint8_t row, uint8_t column, char value);
+
 private:
     Print& uart_;
 };

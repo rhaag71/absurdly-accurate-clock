@@ -1,0 +1,194 @@
+#include "clock_state.hpp"
+#include "clock_display.hpp"
+#include <cassert>
+#include <cstdio>
+#include <cstring>
+#include <string>
+using namespace clock_model;
+using nmea::Result;
+
+nmea::Utc date(unsigned y, unsigned m, unsigned d, unsigned h, unsigned min, unsigned s) {
+    nmea::Utc u;
+    u.year=y; u.month=m; u.day=d; u.hour=h; u.minute=min; u.second=s;
+    return u;
+}
+struct Rig {
+    Timebase clock;
+    Pulse pulse;
+    uint32_t now = 0;
+    void edge() {
+        now += 1000000;
+        ++pulse.sequence; pulse.at_us=now; pulse.seen=true;
+        clock.poll(pulse, now);
+    }
+    void label(const nmea::Utc& utc, unsigned offset = 200000) {
+        Reception rx;
+        rx.sequence=pulse.sequence; rx.start_us=now+100000; rx.usable=true;
+        clock.receive(Result::valid_rmc, utc, 'A', rx, now+offset);
+    }
+    void acquire(const nmea::Utc& utc) {
+        edge(); // Establish pulse stream.
+        edge(); label(utc);
+        assert(clock.state().gps_valid && !clock.state().pps_locked && !clock.state().utc_valid);
+        edge(); label(fromUnix(toUnix(utc)+1));
+        assert(!clock.state().pps_locked); // Two labels alone never change display time.
+        edge();
+        assert(clock.state().pps_locked && clock.state().utc_valid);
+        assert(clock.state().utc_seconds == toUnix(utc)+2);
+    }
+};
+void rollovers() {
+    const auto initial = date(2026,9,23,3,0,58);
+    Rig rig; rig.acquire(initial); // 03:01:00
+    for (unsigned i=0; i<130; ++i) {
+        const auto before = rig.clock.state();
+        const auto frame = clock_display::render(before);
+        rig.label(before.utc);
+        assert(rig.clock.state().utc_seconds == before.utc_seconds);
+        rig.edge();
+        const auto after=rig.clock.state();
+        assert(after.utc_seconds == before.utc_seconds+1);
+        const auto next=clock_display::render(after);
+        const auto diff=clock_display::difference(frame,next);
+        assert(!diff.full);
+        assert(diff.time_positions & (1u<<11));
+        assert(bool(diff.time_positions & (1u<<10)) == (before.utc.second%10==9));
+        if (before.utc.second%10 != 9) assert(diff.time_positions == (1u<<11));
+        if (before.utc.second==59) assert(diff.time_positions & (1u<<8));
+        assert(std::strlen(next.rows[0])==20 && std::strlen(next.rows[1])==20);
+    }
+    for (const auto& u : {date(2026,9,23,3,59,57), date(2026,9,30,23,59,57),
+                           date(2026,12,31,23,59,57),date(2024,2,28,23,59,57),
+                           date(2024,2,29,23,59,57),date(2025,2,28,23,59,57)}) {
+        Rig r; r.acquire(u); r.label(r.clock.state().utc); r.edge();
+        const auto& v=r.clock.state().utc;
+        assert(v.second==0 && v.minute==0);
+        if(u.hour==23) { assert(v.hour==0); assert(v.day!=u.day); }
+        else assert(v.hour==4);
+        assert(toUnix(v)==toUnix(u)+3);
+    }
+    assert(fromUnix(toUnix(date(2024,2,28,23,59,59))+1).day==29);
+    assert(fromUnix(toUnix(date(2025,2,28,23,59,59))+1).month==3);
+    assert(fromUnix(toUnix(date(2026,12,31,23,59,59))+1).year==2027);
+}
+void association() {
+    auto u=date(2026,9,23,3,1,0);
+    Rig r; r.edge(); r.label(u); r.edge();
+    assert(!r.clock.state().pps_locked); // No qualified cadence at first RMC.
+    r.label(u); r.edge(); r.label(u); r.edge();
+    assert(!r.clock.state().pps_locked); // Repeated/frozen time is not a mapping.
+    r.label(fromUnix(toUnix(u)+1)); r.edge();
+    assert(r.clock.state().pps_locked);
+    const auto old=r.clock.state().utc_seconds;
+    r.label(fromUnix(old+10));
+    assert(!r.clock.state().pps_locked && r.clock.state().utc_seconds==old);
+    r.edge(); r.label(fromUnix(old+11));
+    assert(!r.clock.state().pps_locked);
+    r.edge(); assert(r.clock.state().utc_seconds==old+12 && r.clock.state().pps_locked);
+
+    Rig late; late.edge(); late.edge(); late.label(u,950000); late.edge();
+    late.label(fromUnix(toUnix(u)+1),950000); late.edge();
+    assert(late.clock.state().gps_valid && !late.clock.state().pps_locked);
+    Reception crossed; crossed.sequence=late.pulse.sequence-1;
+    crossed.start_us=late.now-100000; crossed.usable=true;
+    late.clock.receive(Result::valid_rmc,u,'A',crossed,late.now+100000);
+    late.edge(); assert(!late.clock.state().pps_locked);
+    u.fractional=true;
+    late.label(u); late.edge(); late.label(u); late.edge();
+    assert(!late.clock.state().pps_locked);
+
+    Rig early; early.edge(); early.edge();
+    Reception near_edge; near_edge.sequence=early.pulse.sequence;
+    near_edge.start_us=early.now+10000; near_edge.usable=true;
+    early.clock.receive(Result::valid_rmc,date(2026,9,23,3,1,0),'A',near_edge,early.now+200000);
+    early.edge(); early.label(date(2026,9,23,3,1,1)); early.edge();
+    assert(!early.clock.state().pps_locked);
+
+    Rig no_pps;
+    Reception rx;
+    no_pps.clock.receive(Result::valid_rmc,u,'A',rx,100000);
+    assert(no_pps.clock.state().gps_valid && !no_pps.clock.state().pps_present && !no_pps.clock.state().utc_valid);
+}
+void losses() {
+    Rig r; r.acquire(date(2026,9,23,3,1,0));
+    const auto saved=r.clock.state().utc_seconds;
+    r.clock.poll(r.pulse,r.now+Timebase::pps_timeout_us);
+    assert(!r.clock.state().pps_present && !r.clock.state().pps_locked && !r.clock.state().utc_valid);
+    assert(r.clock.state().gps_valid && r.clock.state().utc_seconds==saved);
+    // A stale edge must not reappear after the 32-bit timer wraps.
+    r.clock.poll(r.pulse,r.pulse.at_us+1);
+    assert(!r.clock.state().pps_present);
+    r.now+=2000000; r.edge(); r.label(date(2026,9,23,3,1,5));
+    assert(!r.clock.state().pps_locked);
+    r.edge(); r.label(date(2026,9,23,3,1,6));
+    r.edge(); r.label(date(2026,9,23,3,1,7)); r.edge();
+    assert(r.clock.state().pps_locked);
+    r.edge(); r.edge(); r.edge();
+    assert(r.clock.state().pps_present && !r.clock.state().gps_valid && !r.clock.state().pps_locked);
+
+    Rig unusable; unusable.acquire(date(2026,9,23,3,1,0));
+    for (unsigned i=0; i<4; ++i) {
+        unusable.label(fromUnix(unusable.clock.state().utc_seconds),950000);
+        unusable.edge();
+    }
+    assert(unusable.clock.state().gps_valid && unusable.clock.state().pps_present &&
+           !unusable.clock.state().pps_locked);
+
+    Rig invalid; invalid.acquire(date(2026,9,23,3,1,0));
+    invalid.clock.receive(Result::invalid_rmc,{},'V',{},invalid.now+200000);
+    assert(!invalid.clock.state().gps_valid && !invalid.clock.state().pps_locked);
+    Rig skipped; skipped.acquire(date(2026,9,23,3,1,0));
+    skipped.pulse.sequence+=2; skipped.now+=2000000; skipped.pulse.at_us=skipped.now;
+    skipped.clock.poll(skipped.pulse,skipped.now);
+    assert(!skipped.clock.state().pps_locked);
+    Rig glitch; glitch.acquire(date(2026,9,23,3,1,0));
+    ++glitch.pulse.sequence; glitch.pulse.at_us+=10000;
+    glitch.clock.poll(glitch.pulse,glitch.pulse.at_us);
+    assert(!glitch.clock.state().pps_locked);
+    Rig stalled; stalled.acquire(date(2026,9,23,3,1,0));
+    stalled.clock.discardAssociation(); assert(!stalled.clock.state().pps_locked);
+    Rig wrap; wrap.now=UINT32_MAX-2500000; wrap.pulse.sequence=UINT32_MAX-2;
+    wrap.acquire(date(2026,9,23,3,1,0));
+    assert(wrap.clock.state().pps_locked);
+}
+std::string sentence(const std::string& body) {
+    unsigned sum=0; for(char c:body) sum^=c;
+    char end[8]; snprintf(end,sizeof(end),"*%02X\r\n",sum);
+    return "$"+body+end;
+}
+void parserTests() {
+    nmea::RmcParser parser;
+    nmea::Utc utc; char status='?';
+    auto feed=[&](const std::string& text) {
+        auto result=Result::none;
+        for(char c:text) {auto next=parser.receive(c,utc,status); if(next!=Result::none) result=next;}
+        return result;
+    };
+    assert(feed(sentence("GPRMC,030127.00,A,,,,,,,230926"))==Result::valid_rmc);
+    assert(!utc.fractional && utc.second==27 && utc.year==2026);
+    assert(feed(sentence("GPRMC,030127.001,A,,,,,,,230926"))==Result::valid_rmc && utc.fractional);
+    assert(feed(sentence("GNRMC,030127,A,,,,,,,230926"))==Result::none);
+    assert(feed(sentence("GPRMC,030127,V,,,,,,,230926"))==Result::invalid_rmc);
+    assert(feed(sentence("GPRMC,030127,A,,,,,,,290226"))==Result::invalid_rmc);
+    assert(feed("$GPRMC,030127,A,,,,,,,230926*ZZ\r\n")==Result::none);
+    auto bad=sentence("GPRMC,030127,A,,,,,,,230926"); bad[8]='9';
+    assert(feed(bad)==Result::none);
+    assert(feed("$"+std::string(200,'x')+"\n")==Result::none);
+    assert(feed("$partial"+sentence("GPRMC,030127,A,,,,,,,230926"))==Result::valid_rmc);
+}
+void displayTests() {
+    State s;
+    auto f=clock_display::render(s);
+    assert(std::strcmp(f.rows[0],"UTC --:--:-- GPS N/A")==0);
+    assert(std::strcmp(f.rows[1],"PPS:NO SYNC:NO      ")==0);
+    s.utc=date(2026,9,23,3,1,27); s.utc_valid=s.gps_valid=s.pps_present=s.pps_locked=true;
+    auto next=clock_display::render(s);
+    assert(std::strcmp(next.rows[0],"UTC 03:01:27 GPS OK ")==0);
+    assert(std::strcmp(next.rows[1],"PPS:OK SYNC:OK      ")==0);
+    assert(clock_display::difference(f,next).full);
+    assert(!clock_display::difference(next,next).time_positions);
+}
+int main() {
+    parserTests(); rollovers(); association(); losses(); displayTests();
+    puts("All clock/parser/display host tests passed");
+}

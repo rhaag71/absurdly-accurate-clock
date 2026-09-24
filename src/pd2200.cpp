@@ -25,4 +25,13 @@ void Display::writeRow(uint8_t row, const char (&text)[columns + 1]) {
     uart_.write(position, sizeof(position));
     uart_.write(reinterpret_cast<const uint8_t*>(text), columns);
 }
+void Display::writeChar(uint8_t row, uint8_t column, char value) {
+    if (row >= 2 || column >= columns) return;
+    const uint8_t command[] = {
+        0x1B, 0x48, static_cast<uint8_t>(row * columns + column),
+        static_cast<uint8_t>(value),
+    };
+    uart_.write(command, sizeof(command));
+}
+
 }
