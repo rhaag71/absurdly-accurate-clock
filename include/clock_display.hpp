@@ -2,13 +2,22 @@
 #include "clock_state.hpp"
 
 namespace clock_display {
+constexpr unsigned columns = 20;
+constexpr uint8_t decade_row = 0;
+constexpr uint8_t decade_column = 13; // Physical column 14, after literal decimal point.
+constexpr uint32_t decade_step_us = 50000;
 struct Frame {
-    char rows[2][21];
+    Frame(); // Spaces describe cleared cells; they are not sent by normal output.
+    char rows[2][columns + 1];
 };
-Frame render(const clock_model::State& state);
+// PPS-synchronized rolling decade indicator: expendable visual output, NOT UTC.
+// The caller must first poll the timebase with this same captured pulse.
+char rollingDecade(const clock_model::State& state, const clock_model::Pulse& pulse,
+                   uint32_t now_us);
+Frame render(const clock_model::State& state, const clock_model::Pulse& pulse = {},
+             uint32_t now_us = 0);
 struct Update {
-    bool full = false;
-    uint32_t time_positions = 0; // Bit N means write column N in row 0.
+    uint32_t positions[2] = {}; // Changed occupied cells only; never padding.
 };
 Update difference(const Frame& before, const Frame& after);
 }

@@ -8,5 +8,5 @@ c++ -std=c++11 -Wall -Wextra -Werror -I include \
     test/host/timebase_test.cpp -o "$test_dir/timebase"
 "$test_dir/timebase"
 c++ -std=c++11 -Wall -Wextra -Werror -I test/host/stubs -I include \
-    src/pd2200.cpp src/clock_display.cpp test/host/vfd_test.cpp -o "$test_dir/vfd"
+    src/pd2200.cpp src/clock_display.cpp src/clock_vfd.cpp test/host/vfd_test.cpp -o "$test_dir/vfd"
 "$test_dir/vfd"

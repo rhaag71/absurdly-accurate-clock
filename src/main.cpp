@@ -3,6 +3,7 @@
 #include <cstdio>
 #include "clock_state.hpp"
 #include "clock_display.hpp"
+#include "clock_vfd.hpp"
 #include "pins.hpp"
 #include "hardware.hpp"
 #include "pd2200.hpp"
@@ -64,35 +65,8 @@ void reportTransitions() {
     locked = state.pps_locked;
 }
 
-// Keep the proven display encoder unchanged. Queue one pair of rows, then
-// feed UART1 only when writable: SerialUART's bulk write otherwise blocks.
-class VfdQueue : public Print {
-public:
-    size_t write(uint8_t byte) override {
-        if (end_ == sizeof(bytes_)) {
-            return 0;
-        }
-        bytes_[end_++] = byte;
-        return 1;
-    }
-    bool empty() const { return next_ == end_; }
-    void service() {
-        if (!empty() && Serial2.availableForWrite() > 0) {
-            Serial2.write(bytes_[next_++]);
-            if (empty()) {
-                next_ = end_ = 0;
-            }
-        }
-    }
-private:
-    uint8_t bytes_[2 * (3 + pd2200::columns)] = {};
-    size_t next_ = 0;
-    size_t end_ = 0;
-};
-VfdQueue vfd_queue;
-pd2200::Display status_display(vfd_queue);
 pd2200::Display display(Serial2);
-clock_display::Frame displayed = clock_display::render(timebase.state());
+clock_display::Output vfd_output(Serial2);
 uint32_t last_service_us = 0;
 bool discard_rx = true; // Startup delays buffered bytes without arrival timestamps.
 clock_model::Reception reception;
@@ -110,8 +84,9 @@ void setup() {
     attachInterrupt(digitalPinToInterrupt(pins::gps_pps), onPpsRise, RISING);
     delay(500); // Short power-up allowance for the separately powered VFD.
     display.begin();
-    display.writeRow(0, displayed.rows[0]);
-    display.writeRow(1, displayed.rows[1]);
+    const auto initial = clock_display::render(timebase.state());
+    clock_display::writeInitialFields(display, initial);
+    vfd_output.reset(initial);
     Serial2.flush();
     diagnostic("GPS/PPS UTC clock; RMC labels preceding PPS\r\n");
     last_service_us = micros();
@@ -159,26 +134,17 @@ void loop() {
         usb_tail = (usb_tail + 1) % sizeof(usb_queue);
         --usb_used;
     }
-    vfd_queue.service();
     const uint32_t now = millis();
     if (now - last_heartbeat_ms >= 500) {
         last_heartbeat_ms = now;
         heartbeat_on = !heartbeat_on;
         digitalWrite(LED_BUILTIN, heartbeat_on ? HIGH : LOW);
     }
-    if (vfd_queue.empty()) {
-        const auto next = clock_display::render(timebase.state());
-        const auto update = clock_display::difference(displayed, next);
-        if (update.full) {
-            status_display.writeRow(0, next.rows[0]);
-            status_display.writeRow(1, next.rows[1]);
-        } else {
-            // Usually column 11 alone; column 10 changes at each ten-second roll.
-            // Minute/hour rollover uses the same authoritative UTC digit diff.
-            for (uint8_t column = 4; column < 12; ++column)
-                if (update.time_positions & (1u << column))
-                    status_display.writeChar(0, column, next.rows[0][column]);
-        }
-        displayed = next;
-    }
+    // Refresh/poll the same pulse snapshot used for visual phase. Neither RMC
+    // arrival nor an animation timer can advance the authoritative UTC timebase.
+    pulse = snapshot(now_us);
+    timebase.poll(pulse, now_us);
+    reportTransitions();
+    const auto desired = clock_display::render(timebase.state(), pulse, now_us);
+    vfd_output.service(desired, Serial2.availableForWrite() > 0);
 }

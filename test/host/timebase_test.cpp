@@ -50,11 +50,10 @@ void rollovers() {
         assert(after.utc_seconds == before.utc_seconds+1);
         const auto next=clock_display::render(after);
         const auto diff=clock_display::difference(frame,next);
-        assert(!diff.full);
-        assert(diff.time_positions & (1u<<11));
-        assert(bool(diff.time_positions & (1u<<10)) == (before.utc.second%10==9));
-        if (before.utc.second%10 != 9) assert(diff.time_positions == (1u<<11));
-        if (before.utc.second==59) assert(diff.time_positions & (1u<<8));
+        assert(diff.positions[0] & (1u<<11));
+        assert(bool(diff.positions[0] & (1u<<10)) == (before.utc.second%10==9));
+        if (before.utc.second%10 != 9) assert(diff.positions[0] == (1u<<11));
+        if (before.utc.second==59) assert(diff.positions[0] & (1u<<8));
         assert(std::strlen(next.rows[0])==20 && std::strlen(next.rows[1])==20);
     }
     for (const auto& u : {date(2026,9,23,3,59,57), date(2026,9,30,23,59,57),
@@ -179,16 +178,97 @@ void parserTests() {
 void displayTests() {
     State s;
     auto f=clock_display::render(s);
-    assert(std::strcmp(f.rows[0],"UTC --:--:-- GPS N/A")==0);
-    assert(std::strcmp(f.rows[1],"PPS:NO SYNC:NO      ")==0);
+    assert(std::strcmp(f.rows[0],"UTC --:--:--.-      ")==0);
+    assert(std::strcmp(f.rows[1],"GPS - PPS -         ")==0);
     s.utc=date(2026,9,23,3,1,27); s.utc_valid=s.gps_valid=s.pps_present=s.pps_locked=true;
-    auto next=clock_display::render(s);
-    assert(std::strcmp(next.rows[0],"UTC 03:01:27 GPS OK ")==0);
-    assert(std::strcmp(next.rows[1],"PPS:OK SYNC:OK      ")==0);
-    assert(clock_display::difference(f,next).full);
-    assert(!clock_display::difference(next,next).time_positions);
+    Pulse pulse; pulse.seen=true; pulse.at_us=1000000;
+    auto next=clock_display::render(s,pulse,pulse.at_us);
+    assert(std::strcmp(next.rows[0],"UTC 03:01:27.0      ")==0);
+    assert(std::strcmp(next.rows[1],"GPS | PPS |         ")==0);
+    const auto same=clock_display::difference(next,next);
+    assert(!same.positions[0] && !same.positions[1]);
+    const auto changed=clock_display::difference(f,next);
+    assert(changed.positions[1]==((1u<<4)|(1u<<10)));
+}
+void paddingTests() {
+    using namespace clock_display;
+    static_assert(columns == 20, "Physical width must remain 20");
+    static_assert(decade_row == 0 && decade_column == 13,
+                  "Physical column 14 is the rolling decade indicator");
+    const Frame blank;
+    for (const auto& row : blank.rows) {
+        for(unsigned col=0;col<20;++col) assert(row[col]==0x20);
+        assert(row[20]=='\0');
+    }
+    Pulse pulse; pulse.seen=true; pulse.at_us=1000000;
+    for(unsigned flags=0;flags<16;++flags) {
+        State state;
+        state.utc_valid=flags&1; state.gps_valid=flags&2;
+        state.pps_present=flags&4; state.pps_locked=flags&8;
+        for(unsigned second=0;second<60;++second) {
+            state.utc=date(2026,9,23,3,1,second);
+            const auto frame=render(state,pulse,pulse.at_us);
+            for(unsigned row=0;row<2;++row) {
+                assert(std::strlen(frame.rows[row])==20 && frame.rows[row][20]=='\0');
+                for(unsigned col=0;col<20;++col) {
+                    const auto value=frame.rows[row][col];
+                    assert(value>=0x20 && value<=0x7e);
+                    const bool digit=row==0 && (col==4 || col==5 || col==7 || col==8 || col==10 || col==11 || col==13);
+                    if(!digit) assert(value!='0');
+                    const bool padding=row==0 ? (col==3 || col>=14) : (col==3 || col==5 || col==9 || col>=11);
+                    if(padding) assert(value==0x20);
+                }
+            }
+        }
+    }
+}
+void decadeTests() {
+    using namespace clock_display;
+    Rig rig; rig.acquire(date(2026,9,23,3,48,1)); // Authoritative 03:48:03
+    const auto epoch=rig.clock.state().utc_seconds;
+    const auto base=render(rig.clock.state(),rig.pulse,rig.now);
+    assert(std::strcmp(base.rows[0],"UTC 03:48:03.0      ")==0);
+    const unsigned starts[]={0,500000,550000,600000,650000,700000,750000,800000,850000,900000};
+    const unsigned ends[]={499999,549999,599999,649999,699999,749999,799999,849999,899999,999999};
+    for(unsigned digit=0;digit<10;++digit) {
+        for(unsigned phase : {starts[digit],ends[digit]}) {
+            const auto frame=render(rig.clock.state(),rig.pulse,rig.now+phase);
+            assert(frame.rows[0][13]==static_cast<char>('0'+digit));
+            assert(std::memcmp(base.rows[0],frame.rows[0],13)==0);
+            assert(rig.clock.state().utc_seconds==epoch);
+        }
+    }
+    // Explicit requested millisecond checkpoints, in addition to microsecond edges.
+    const unsigned milliseconds[]={0,499,500,549,550,900,999};
+    const char expected[]={'0','0','1','1','2','9','9'};
+    for(unsigned i=0;i<sizeof(expected);++i)
+        assert(rollingDecade(rig.clock.state(),rig.pulse,rig.now+milliseconds[i]*1000)==expected[i]);
+    for(unsigned phase : {1000000u,1499999u})
+        assert(rollingDecade(rig.clock.state(),rig.pulse,rig.now+phase)=='9');
+    assert(rollingDecade(rig.clock.state(),rig.pulse,rig.now+1500000)=='-');
+    // A missed series of loop calls jumps to the current phase, without catch-up.
+    assert(rollingDecade(rig.clock.state(),rig.pulse,rig.now+1000)=='0');
+    assert(rollingDecade(rig.clock.state(),rig.pulse,rig.now+327000)=='0');
+    assert(rollingDecade(rig.clock.state(),rig.pulse,rig.now+710000)=='5');
+    rig.label(rig.clock.state().utc,140000); // NMEA arrival must not restart phase.
+    assert(rollingDecade(rig.clock.state(),rig.pulse,rig.now+140000)=='0');
+    rig.edge();
+    assert(rig.clock.state().utc_seconds==epoch+1);
+    assert(rollingDecade(rig.clock.state(),rig.pulse,rig.now)=='0');
+    const auto next=render(rig.clock.state(),rig.pulse,rig.now);
+    assert(std::memcmp(next.rows[0]+4,"03:48:04.0",10)==0);
+    // Timestamp wrap does not shift phase.
+    Pulse wrapped=rig.pulse; wrapped.at_us=UINT32_MAX-25000;
+    assert(rollingDecade(rig.clock.state(),wrapped,wrapped.at_us+500000)=='1');
+    auto invalid=rig.clock.state(); invalid.pps_locked=false;
+    assert(rollingDecade(invalid,rig.pulse,rig.now)=='-');
+    invalid=rig.clock.state(); invalid.utc_valid=false;
+    assert(rollingDecade(invalid,rig.pulse,rig.now)=='-');
+    invalid=rig.clock.state(); invalid.pps_present=false;
+    assert(rollingDecade(invalid,rig.pulse,rig.now)=='-');
+    assert(rollingDecade(rig.clock.state(),{},rig.now)=='-');
 }
 int main() {
-    parserTests(); rollovers(); association(); losses(); displayTests();
+    parserTests(); rollovers(); association(); losses(); displayTests(); paddingTests(); decadeTests();
     puts("All clock/parser/display host tests passed");
 }

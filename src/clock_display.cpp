@@ -2,14 +2,33 @@
 #include <cstring>
 
 namespace clock_display {
-Frame render(const clock_model::State& state) {
+Frame::Frame() {
+    for (auto& row : rows) {
+        std::memset(row, 0x20, columns);
+        row[columns] = '\0';
+    }
+}
+char rollingDecade(const clock_model::State& state, const clock_model::Pulse& pulse,
+                   uint32_t now_us) {
+    if (!state.utc_valid || !state.pps_locked || !state.pps_present || !pulse.seen)
+        return '-';
+    const uint32_t elapsed = now_us - pulse.at_us; // Wrap-safe; no free-running modulo.
+    if (elapsed >= clock_model::Timebase::pps_timeout_us) return '-';
+    // Arrive at HH:MM:SS.0, rest for half a second, then wind toward the next PPS.
+    if (elapsed < 500000) return '0';
+    const uint32_t step = 1 + (elapsed - 500000) / decade_step_us;
+    return static_cast<char>('0' + (step < 9 ? step : 9));
+}
+Frame render(const clock_model::State& state, const clock_model::Pulse& pulse,
+             uint32_t now_us) {
     Frame frame;
-    // Literal spaces, not printf numeric padding; each row has exactly 20 cells.
-    std::memcpy(frame.rows[0], "UTC --:--:-- GPS N/A", 21);
-    std::memcpy(frame.rows[1], "PPS:NO SYNC:NO      ", 21);
-    if (state.gps_valid) std::memcpy(frame.rows[0] + 17, "OK ", 3);
-    if (state.pps_present) std::memcpy(frame.rows[1] + 4, "OK", 2);
-    if (state.pps_locked) std::memcpy(frame.rows[1] + 12, "OK", 2);
+    std::memcpy(frame.rows[0], "UTC", 3);
+    std::memcpy(frame.rows[0] + 4, "--:--:--.", 9);
+    frame.rows[decade_row][decade_column] = rollingDecade(state, pulse, now_us);
+    std::memcpy(frame.rows[1], "GPS", 3);
+    frame.rows[1][4] = state.gps_valid ? '|' : '-';
+    std::memcpy(frame.rows[1] + 6, "PPS", 3);
+    frame.rows[1][10] = state.pps_present ? '|' : '-';
     if (state.utc_valid) {
         const unsigned values[] = {state.utc.hour, state.utc.minute, state.utc.second};
         for (unsigned i = 0; i < 3; ++i) {
@@ -21,12 +40,13 @@ Frame render(const clock_model::State& state) {
 }
 Update difference(const Frame& before, const Frame& after) {
     Update update;
-    update.full = std::strcmp(before.rows[1], after.rows[1]) != 0 ||
-                  std::strcmp(before.rows[0] + 12, after.rows[0] + 12) != 0 ||
-                  (before.rows[0][4] == '-') != (after.rows[0][4] == '-');
-    if (!update.full) {
-        for (unsigned i = 4; i < 12; ++i)
-            if (before.rows[0][i] != after.rows[0][i]) update.time_positions |= 1u << i;
+    for (unsigned row = 0; row < 2; ++row) {
+        for (unsigned col = 0; col < columns; ++col) {
+            // Layout occupancy is fixed even when time/status becomes invalid.
+            // A future layout change must clear once and reset the output cache.
+            if (after.rows[row][col] != ' ' && before.rows[row][col] != after.rows[row][col])
+                update.positions[row] |= 1u << col;
+        }
     }
     return update;
 }
