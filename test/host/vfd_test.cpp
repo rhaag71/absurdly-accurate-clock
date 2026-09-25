@@ -18,9 +18,10 @@ void checkUpdates(const std::vector<uint8_t>& bytes) {
         assert(bytes[i]==0x1b && bytes[i+1]==0x48 && bytes[i+2]<40);
         assert(bytes[i+3]>0x20 && bytes[i+3]<=0x7e);
         const unsigned address=bytes[i+2];
-        assert(address<3 || (address>=4 && address<=13) ||
-               (address>=20 && address<=22) || address==24 ||
-               (address>=26 && address<=28) || address==30);
+        assert((address>=3 && address<=5) || (address>=7 && address<=16) ||
+               (address>=20 && address<=23) ||
+               (address>=26 && address<=29) ||
+               (address>=32 && address<=34) || address==36 || address==37);
     }
 }
 void finish(Output& output, const Frame& target) {
@@ -41,10 +42,10 @@ int main() {
     // Emulate hardware clear memory, interpreting spaces as '0' if sent. The
     // initialized screen must nevertheless match the intended 2x20 frame.
     Frame screen;
-    const unsigned lengths[]={3,10,3,1,3,1};
-    const unsigned addresses[]={0,4,20,24,26,30};
+    const unsigned lengths[]={3,10,3,1,3,1,3,1,1};
+    const unsigned addresses[]={3,7,20,23,26,29,32,36,37};
     size_t offset=0;
-    for(unsigned field=0;field<6;++field) {
+    for(unsigned field=0;field<9;++field) {
         assert(sink.bytes[offset++]==0x1b && sink.bytes[offset++]==0x48);
         assert(sink.bytes[offset++]==addresses[field]);
         for(unsigned c=0;c<lengths[field];++c) {
@@ -71,11 +72,11 @@ int main() {
         assert(sink.bytes.size()==(second==59 ? 16u : second%10==9 ? 12u : 8u));
         for(size_t i=0;i<sink.bytes.size();i+=4) {
             const auto col=sink.bytes[i+2];
-            assert(col>=4 && col<=13);
+            assert(col>=7 && col<=16);
             assert(before.rows[0][col]!=after.rows[0][col]);
             assert(sink.bytes[i+3]==after.rows[0][col]);
         }
-        assert(sink.bytes[sink.bytes.size()-2]==13); // UTC before animation.
+        assert(sink.bytes[sink.bytes.size()-2]==16); // UTC before animation.
         const auto written=sink.bytes.size(); finish(output,after);
         assert(sink.bytes.size()==written); // Unchanged characters suppressed.
     }
@@ -86,7 +87,7 @@ int main() {
     state.gps_valid=false;
     auto changed=clock_display::render(state,pulse,pulse.at_us);
     sink.bytes.clear(); finish(output,changed);
-    assert((sink.bytes==std::vector<uint8_t>{0x1b,0x48,24,'-'}));
+    assert((sink.bytes==std::vector<uint8_t>{0x1b,0x48,23,'-'}));
     state.pps_present=false; state.pps_locked=false; state.utc_valid=false;
     changed=clock_display::render(state,pulse,pulse.at_us);
     sink.bytes.clear(); finish(output,changed);
@@ -102,23 +103,23 @@ int main() {
     assert(sink.bytes.empty());
     changed=clock_display::render(state,pulse,pulse.at_us+777000);
     finish(output,changed);
-    assert((sink.bytes==std::vector<uint8_t>{0x1b,0x48,13,'6'}));
+    assert((sink.bytes==std::vector<uint8_t>{0x1b,0x48,16,'6'}));
     // A partial header delayed past several phases sends the current glyph.
     output.reset(frame); sink.bytes.clear();
     changed=clock_display::render(state,pulse,pulse.at_us+500000);
     output.service(changed,true); output.service(changed,true);
     finish(output,clock_display::render(state,pulse,pulse.at_us+900000));
-    assert((sink.bytes==std::vector<uint8_t>{0x1b,0x48,13,'9'}));
+    assert((sink.bytes==std::vector<uint8_t>{0x1b,0x48,16,'9'}));
     // The next PPS also replaces an in-flight old-second animation payload.
     output.reset(frame); sink.bytes.clear();
     for(unsigned i=0;i<3;++i) output.service(changed,true);
     pulse.at_us+=1000000;
     output.service(clock_display::render(state,pulse,pulse.at_us),true);
     // Position command already sent, but redundant '0' is omitted. Cursor is off.
-    assert((sink.bytes==std::vector<uint8_t>{0x1b,0x48,13}));
+    assert((sink.bytes==std::vector<uint8_t>{0x1b,0x48,16}));
     sink.bytes.clear();
     finish(output,clock_display::render(state,pulse,pulse.at_us+550000));
-    assert((sink.bytes==std::vector<uint8_t>{0x1b,0x48,13,'2'}));
+    assert((sink.bytes==std::vector<uint8_t>{0x1b,0x48,16,'2'}));
     // Hold .0 without traffic for 500 ms, then produce nine changes and hold .9.
     output.reset(clock_display::render(state,pulse,pulse.at_us)); sink.bytes.clear();
     for(unsigned ms=0;ms<1000;++ms) {
@@ -129,6 +130,21 @@ int main() {
     checkUpdates(sink.bytes);
     assert(sink.bytes.size()==9*4);
     for(unsigned digit=1;digit<=9;++digit) assert(sink.bytes[(digit-1)*4+3]=='0'+digit);
+
+    state.satellites.valid=true; state.satellites.used=8;
+    frame=clock_display::render(state,pulse,pulse.at_us); output.reset(frame);
+    state.satellites.used=9;
+    auto sat_changed=clock_display::render(state,pulse,pulse.at_us);
+    sink.bytes.clear(); finish(output,sat_changed);
+    assert((sink.bytes==std::vector<uint8_t>{0x1b,0x48,37,'9'}));
+    output.reset(sat_changed); state.satellites.used=12;
+    sat_changed=clock_display::render(state,pulse,pulse.at_us);
+    sink.bytes.clear(); finish(output,sat_changed);
+    assert((sink.bytes==std::vector<uint8_t>{0x1b,0x48,36,'1',0x1b,0x48,37,'2'}));
+    output.reset(sat_changed); state.satellites.valid=false;
+    sat_changed=clock_display::render(state,pulse,pulse.at_us);
+    sink.bytes.clear(); finish(output,sat_changed);
+    assert((sink.bytes==std::vector<uint8_t>{0x1b,0x48,36,'-',0x1b,0x48,37,'-'}));
 
     // Keep and test the full-row utility, although normal operation never uses it.
     sink.bytes.clear();

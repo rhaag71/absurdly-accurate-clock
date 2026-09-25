@@ -1,6 +1,16 @@
 #include "clock_state.hpp"
 
 namespace clock_model {
+void SatelliteStatus::receive(nmea::GgaResult result, uint8_t count, uint32_t now_us) {
+    if (result == nmea::GgaResult::none) return;
+    if (result == nmea::GgaResult::invalid_gga) { valid = false; return; }
+    used = count;
+    updated_us = now_us;
+    valid = true;
+}
+void SatelliteStatus::poll(uint32_t now_us) {
+    if (valid && static_cast<uint32_t>(now_us - updated_us) >= stale_after_us) valid = false;
+}
 namespace {
 bool leap(unsigned year) {
     return year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);

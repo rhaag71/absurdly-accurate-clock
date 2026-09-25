@@ -13,6 +13,7 @@ constexpr unsigned long gps_baud = 9600; // Confirm against the GPS configuratio
 constexpr unsigned long vfd_baud = 9600; // Confirm against the PD-2200 switches.
 clock_model::Timebase timebase;
 nmea::RmcParser parser;
+nmea::GgaParser gga_parser;
 volatile uint32_t pps_count = 0;
 volatile uint32_t pps_at_us = 0;
 volatile bool pps_seen = false;
@@ -100,11 +101,13 @@ void loop() {
     if (uint32_t(now_us - last_service_us) > 20000) {
         discard_rx = true;
         parser = nmea::RmcParser{};
+        gga_parser = nmea::GgaParser{};
         timebase.discardAssociation();
         reportTransitions();
     }
     last_service_us = now_us;
     timebase.poll(pulse, now_us);
+    timebase.satelliteStatus().poll(now_us);
     reportTransitions();
 
     // Bound work so incoming UART traffic cannot starve pulse/display handling.
@@ -124,6 +127,9 @@ void loop() {
         char status = '?';
         const auto result = parser.receive(static_cast<char>(received), utc, status);
         timebase.receive(result, utc, status, reception, now_us);
+        uint8_t satellites = 0;
+        const auto gga_result = gga_parser.receive(static_cast<char>(received), satellites);
+        timebase.satelliteStatus().receive(gga_result, satellites, now_us);
         reportTransitions();
     }
     if (discard_rx && Serial1.available() == 0) discard_rx = false;
@@ -144,6 +150,7 @@ void loop() {
     // arrival nor an animation timer can advance the authoritative UTC timebase.
     pulse = snapshot(now_us);
     timebase.poll(pulse, now_us);
+    timebase.satelliteStatus().poll(now_us);
     reportTransitions();
     const auto desired = clock_display::render(timebase.state(), pulse, now_us);
     vfd_output.service(desired, Serial2.availableForWrite() > 0);

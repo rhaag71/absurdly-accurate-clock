@@ -50,10 +50,10 @@ void rollovers() {
         assert(after.utc_seconds == before.utc_seconds+1);
         const auto next=clock_display::render(after);
         const auto diff=clock_display::difference(frame,next);
-        assert(diff.positions[0] & (1u<<11));
-        assert(bool(diff.positions[0] & (1u<<10)) == (before.utc.second%10==9));
-        if (before.utc.second%10 != 9) assert(diff.positions[0] == (1u<<11));
-        if (before.utc.second==59) assert(diff.positions[0] & (1u<<8));
+        assert(diff.positions[0] & (1u<<14));
+        assert(bool(diff.positions[0] & (1u<<13)) == (before.utc.second%10==9));
+        if (before.utc.second%10 != 9) assert(diff.positions[0] == (1u<<14));
+        if (before.utc.second==59) assert(diff.positions[0] & (1u<<11));
         assert(std::strlen(next.rows[0])==20 && std::strlen(next.rows[1])==20);
     }
     for (const auto& u : {date(2026,9,23,3,59,57), date(2026,9,30,23,59,57),
@@ -175,26 +175,62 @@ void parserTests() {
     assert(feed("$"+std::string(200,'x')+"\n")==Result::none);
     assert(feed("$partial"+sentence("GPRMC,030127,A,,,,,,,230926"))==Result::valid_rmc);
 }
+void satelliteTests() {
+    nmea::GgaParser parser;
+    uint8_t count=0;
+    auto feed=[&](const std::string& text) {
+        auto result=nmea::GgaResult::none;
+        for(char c:text) { auto next=parser.receive(c,count); if(next!=nmea::GgaResult::none) result=next; }
+        return result;
+    };
+    assert(feed(sentence("GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,"))==nmea::GgaResult::valid_gga && count==8);
+    assert(feed(sentence("GNGGA,123520,,,,,1,12,1.0,0,M,0,M,,"))==nmea::GgaResult::valid_gga && count==12);
+    assert(feed(sentence("GPGGA,123521,,,,,1,09,1.0,0,M,0,M,,"))==nmea::GgaResult::valid_gga && count==9);
+    assert(feed(sentence("GPGGA,123522,,,,,0,00,1.0,0,M,0,M,,"))==nmea::GgaResult::invalid_gga);
+    assert(feed(sentence("GPGGA,123522,,,,,1,xx,1.0,0,M,0,M,,"))==nmea::GgaResult::invalid_gga);
+    assert(feed(sentence("GPGGA,123522,,,,,1,,1.0,0,M,0,M,,"))==nmea::GgaResult::invalid_gga);
+    auto bad=sentence("GPGGA,123519,,,,,1,08,1.0,0,M,0,M,,"); bad[8]='9';
+    assert(feed(bad)==nmea::GgaResult::none);
+
+    clock_model::SatelliteStatus status;
+    status.receive(nmea::GgaResult::valid_gga,8,1000);
+    assert(status.valid && status.used==8);
+    status.poll(1000+clock_model::SatelliteStatus::stale_after_us-1); assert(status.valid);
+    status.poll(1000+clock_model::SatelliteStatus::stale_after_us); assert(!status.valid);
+    status.receive(nmea::GgaResult::valid_gga,12,5000000); status.poll(5000000);
+    status.receive(nmea::GgaResult::none,0,5000001); assert(status.valid && status.used==12);
+    status.receive(nmea::GgaResult::invalid_gga,0,5000002); assert(!status.valid);
+
+    Rig rig; rig.acquire(date(2026,9,23,3,1,0));
+    const int64_t before=rig.clock.state().utc_seconds;
+    const bool locked=rig.clock.state().pps_locked;
+    status.receive(nmea::GgaResult::valid_gga,8,rig.now);
+    assert(rig.clock.state().utc_seconds==before && rig.clock.state().pps_locked==locked);
+}
 void displayTests() {
     State s;
     auto f=clock_display::render(s);
-    assert(std::strcmp(f.rows[0],"UTC --:--:--.-      ")==0);
-    assert(std::strcmp(f.rows[1],"GPS - PPS -         ")==0);
+    assert(std::strcmp(f.rows[0],"   UTC --:--:--.-   ")==0);
+    assert(std::strcmp(f.rows[1],"GPS-  PPS-  SAT --  ")==0);
     s.utc=date(2026,9,23,3,1,27); s.utc_valid=s.gps_valid=s.pps_present=s.pps_locked=true;
     Pulse pulse; pulse.seen=true; pulse.at_us=1000000;
     auto next=clock_display::render(s,pulse,pulse.at_us);
-    assert(std::strcmp(next.rows[0],"UTC 03:01:27.0      ")==0);
-    assert(std::strcmp(next.rows[1],"GPS | PPS |         ")==0);
+    assert(std::strcmp(next.rows[0],"   UTC 03:01:27.0   ")==0);
+    assert(std::strcmp(next.rows[1],"GPS+  PPS+  SAT --  ")==0);
+    s.satellites.valid=true; s.satellites.used=8;
+    const auto with_sat=clock_display::render(s,pulse,pulse.at_us);
+    assert(std::strcmp(with_sat.rows[1],"GPS+  PPS+  SAT 08  ")==0);
+    assert(with_sat.rows[1][16]=='0' && with_sat.rows[1][17]=='8');
     const auto same=clock_display::difference(next,next);
     assert(!same.positions[0] && !same.positions[1]);
     const auto changed=clock_display::difference(f,next);
-    assert(changed.positions[1]==((1u<<4)|(1u<<10)));
+    assert(changed.positions[1]==((1u<<3)|(1u<<9)));
 }
 void paddingTests() {
     using namespace clock_display;
     static_assert(columns == 20, "Physical width must remain 20");
-    static_assert(decade_row == 0 && decade_column == 13,
-                  "Physical column 14 is the rolling decade indicator");
+    static_assert(decade_row == 0 && decade_column == 16,
+                  "Physical column 17 is the rolling decade indicator");
     const Frame blank;
     for (const auto& row : blank.rows) {
         for(unsigned col=0;col<20;++col) assert(row[col]==0x20);
@@ -213,9 +249,9 @@ void paddingTests() {
                 for(unsigned col=0;col<20;++col) {
                     const auto value=frame.rows[row][col];
                     assert(value>=0x20 && value<=0x7e);
-                    const bool digit=row==0 && (col==4 || col==5 || col==7 || col==8 || col==10 || col==11 || col==13);
+                    const bool digit=row==0 && (col==7 || col==8 || col==10 || col==11 || col==13 || col==14 || col==16);
                     if(!digit) assert(value!='0');
-                    const bool padding=row==0 ? (col==3 || col>=14) : (col==3 || col==5 || col==9 || col>=11);
+                    const bool padding=row==0 ? (col<3 || col>=17) : (col==4 || col==5 || col==10 || col==11 || col==15 || col>=18);
                     if(padding) assert(value==0x20);
                 }
             }
@@ -227,14 +263,14 @@ void decadeTests() {
     Rig rig; rig.acquire(date(2026,9,23,3,48,1)); // Authoritative 03:48:03
     const auto epoch=rig.clock.state().utc_seconds;
     const auto base=render(rig.clock.state(),rig.pulse,rig.now);
-    assert(std::strcmp(base.rows[0],"UTC 03:48:03.0      ")==0);
+    assert(std::strcmp(base.rows[0],"   UTC 03:48:03.0   ")==0);
     const unsigned starts[]={0,500000,550000,600000,650000,700000,750000,800000,850000,900000};
     const unsigned ends[]={499999,549999,599999,649999,699999,749999,799999,849999,899999,999999};
     for(unsigned digit=0;digit<10;++digit) {
         for(unsigned phase : {starts[digit],ends[digit]}) {
             const auto frame=render(rig.clock.state(),rig.pulse,rig.now+phase);
-            assert(frame.rows[0][13]==static_cast<char>('0'+digit));
-            assert(std::memcmp(base.rows[0],frame.rows[0],13)==0);
+            assert(frame.rows[0][16]==static_cast<char>('0'+digit));
+            assert(std::memcmp(base.rows[0],frame.rows[0],16)==0);
             assert(rig.clock.state().utc_seconds==epoch);
         }
     }
@@ -256,7 +292,7 @@ void decadeTests() {
     assert(rig.clock.state().utc_seconds==epoch+1);
     assert(rollingDecade(rig.clock.state(),rig.pulse,rig.now)=='0');
     const auto next=render(rig.clock.state(),rig.pulse,rig.now);
-    assert(std::memcmp(next.rows[0]+4,"03:48:04.0",10)==0);
+    assert(std::memcmp(next.rows[0]+7,"03:48:04.0",10)==0);
     // Timestamp wrap does not shift phase.
     Pulse wrapped=rig.pulse; wrapped.at_us=UINT32_MAX-25000;
     assert(rollingDecade(rig.clock.state(),wrapped,wrapped.at_us+500000)=='1');
@@ -269,6 +305,6 @@ void decadeTests() {
     assert(rollingDecade(rig.clock.state(),{},rig.now)=='-');
 }
 int main() {
-    parserTests(); rollovers(); association(); losses(); displayTests(); paddingTests(); decadeTests();
+    parserTests(); satelliteTests(); rollovers(); association(); losses(); displayTests(); paddingTests(); decadeTests();
     puts("All clock/parser/display host tests passed");
 }

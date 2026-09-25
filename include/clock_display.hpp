@@ -4,7 +4,7 @@
 namespace clock_display {
 constexpr unsigned columns = 20;
 constexpr uint8_t decade_row = 0;
-constexpr uint8_t decade_column = 13; // Physical column 14, after literal decimal point.
+constexpr uint8_t decade_column = 16; // Physical column 17, after literal decimal point.
 constexpr uint32_t decade_step_us = 50000;
 struct Frame {
     Frame(); // Spaces describe cleared cells; they are not sent by normal output.

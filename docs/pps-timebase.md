@@ -103,8 +103,9 @@ invalidate synchronization independently of this effect.
 
 Animation is read-only presentation code. It cannot advance/correct UTC, mutate
 the timebase, or change RMC/PPS association. There is no animation work in the
-ISR, no new delay, and no extra NMEA parser. The existing heartbeat and concise
-startup/GPS/synchronization USB diagnostics remain unchanged.
+ISR, no new delay, and no extra RMC/PPS parsing. A small supplemental GGA parser
+updates satellite status only; it cannot label or advance UTC. The existing
+heartbeat and concise startup/GPS/synchronization USB diagnostics remain unchanged.
 
 ## Final 20-column layout
 
@@ -113,37 +114,49 @@ represent **cleared, unwritten cells**, not transmitted padding bytes:
 
 ```text
 |12345678901234567890|
-|UTC 03:48:03.0      |
-|GPS | PPS |         |
+|   UTC 03:48:03.0   |
+|GPS+  PPS+  SAT 08  |
 ```
 
 | Row | Physical columns | Content |
 | --- | --- | --- |
-| 1 | 1–3 | UTC |
-| 1 | 4 | Cleared gap |
-| 1 | 5–6 | HH |
-| 1 | 7 | Colon |
-| 1 | 8–9 | MM |
+| 1 | 1–3 | Cleared, unused |
+| 1 | 4–6 | UTC |
+| 1 | 7 | Cleared gap |
+| 1 | 8–9 | HH |
 | 1 | 10 | Colon |
-| 1 | 11–12 | SS |
-| 1 | 13 | Literal decimal point |
-| 1 | 14 | PPS-synchronized rolling decade indicator (or `-`) |
-| 1 | 15–20 | Cleared, unused |
+| 1 | 11–12 | MM |
+| 1 | 13 | Colon |
+| 1 | 14–15 | SS |
+| 1 | 16 | Literal decimal point |
+| 1 | 17 | PPS-synchronized rolling decade indicator (or `-`) |
+| 1 | 18–20 | Cleared, unused |
 | 2 | 1–3 | GPS |
-| 2 | 4 | Cleared gap |
-| 2 | 5 | `\|` if GPS data valid; otherwise `-` |
-| 2 | 6 | Cleared gap |
+| 2 | 4 | `+` if GPS data valid; otherwise `-` |
+| 2 | 5–6 | Cleared gap |
 | 2 | 7–9 | PPS |
-| 2 | 10 | Cleared gap |
-| 2 | 11 | `\|` if PPS present; otherwise `-` |
-| 2 | 12–20 | Cleared, unused |
+| 2 | 10 | `+` if PPS present; otherwise `-` |
+| 2 | 11–12 | Cleared gap |
+| 2 | 13–15 | SAT |
+| 2 | 16 | Cleared gap |
+| 2 | 17–18 | Two-digit satellites-used count or `--` |
+| 2 | 19–20 | Cleared, unused |
 
 There is no numeric PPS counter or permanent SYNC label. Synchronization remains
-internal state and in USB diagnostics. RMC does not supply satellite count, so
-SAT is omitted rather than invented. Future `$GPGGA` (or appropriate talker GGA)
-parsing could provide **satellites used** in field 7 (`numSV`); satellites in view
-would be a different metric (GSV), not interchangeable with satellites used.
+internal state and in USB diagnostics. `$GPGGA` and `$GNGGA` field 7 provides the
+satellites-used count (`numSV`) when field 6 indicates a fix. Invalid fix/count
+clears the status immediately; otherwise the count expires after three seconds
+without a valid GGA. Satellite status is supplementary and never enters the
+RMC/PPS timebase. Satellites in view (GSV) are a different metric.
 Reference: [u-blox GGA definition](https://content.u-blox.com/sites/default/files/products/documents/u-blox7-V14_ReceiverDescriptionProtocolSpec_%28GPS.G7-SW-12001%29_Public.pdf).
+
+The 14-character `UTC HH:MM:SS.X` clock is centered with three cleared cells on
+each side. The plus sign is the good/present marker. The [PD-2200/PD-2100
+series manual](https://sabrepoint.onlinesavers.co.za/pub/poledisplayPD2200.pdf)
+documents Noritake mode, but its available text did not establish an upward-arrow
+mapping. The related [PD-2601 technical manual](https://manualzz.com/doc/6566084/posiflex-pd-2601-customer-display-technical-manual) describes Noritake
+emulation and font pages without establishing an arrow byte for the active PD-2200
+character set. No extended glyph is guessed or transmitted.
 
 ## PD-2200 investigation and blank-cell strategy
 

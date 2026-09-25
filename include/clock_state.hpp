@@ -1,8 +1,17 @@
 #pragma once
 #include <cstdint>
 #include "nmea_rmc.hpp"
+#include "nmea_gga.hpp"
 
 namespace clock_model {
+struct SatelliteStatus {
+    static constexpr uint32_t stale_after_us = 3000000;
+    bool valid = false;
+    uint8_t used = 0;
+    uint32_t updated_us = 0;
+    void receive(nmea::GgaResult result, uint8_t count, uint32_t now_us);
+    void poll(uint32_t now_us);
+};
 struct State {
     int64_t utc_seconds = 0; // Authoritative local Unix UTC, updated only on PPS.
     nmea::Utc utc;
@@ -12,6 +21,7 @@ struct State {
     bool gps_valid = false;
     bool pps_present = false;
     bool pps_locked = false;
+    SatelliteStatus satellites;
 };
 
 struct Pulse {
@@ -36,6 +46,7 @@ public:
     static constexpr uint32_t rmc_min_us = 20000;
     static constexpr uint32_t rmc_max_us = 900000;
     const State& state() const { return state_; }
+    SatelliteStatus& satelliteStatus() { return state_.satellites; }
     void poll(const Pulse& pulse, uint32_t now_us);
     void receive(nmea::Result result, const nmea::Utc& utc, char status,
                  const Reception& reception, uint32_t now_us);

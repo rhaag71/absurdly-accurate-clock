@@ -22,18 +22,21 @@ char rollingDecade(const clock_model::State& state, const clock_model::Pulse& pu
 Frame render(const clock_model::State& state, const clock_model::Pulse& pulse,
              uint32_t now_us) {
     Frame frame;
-    std::memcpy(frame.rows[0], "UTC", 3);
-    std::memcpy(frame.rows[0] + 4, "--:--:--.", 9);
+    std::memcpy(frame.rows[0] + 3, "UTC", 3);
+    std::memcpy(frame.rows[0] + 7, "--:--:--.", 9);
     frame.rows[decade_row][decade_column] = rollingDecade(state, pulse, now_us);
     std::memcpy(frame.rows[1], "GPS", 3);
-    frame.rows[1][4] = state.gps_valid ? '|' : '-';
+    frame.rows[1][3] = state.gps_valid ? '+' : '-';
     std::memcpy(frame.rows[1] + 6, "PPS", 3);
-    frame.rows[1][10] = state.pps_present ? '|' : '-';
+    frame.rows[1][9] = state.pps_present ? '+' : '-';
+    std::memcpy(frame.rows[1] + 12, "SAT ", 4);
+    frame.rows[1][16] = state.satellites.valid ? static_cast<char>('0' + state.satellites.used / 10) : '-';
+    frame.rows[1][17] = state.satellites.valid ? static_cast<char>('0' + state.satellites.used % 10) : '-';
     if (state.utc_valid) {
         const unsigned values[] = {state.utc.hour, state.utc.minute, state.utc.second};
         for (unsigned i = 0; i < 3; ++i) {
-            frame.rows[0][4 + i * 3] = '0' + values[i] / 10;
-            frame.rows[0][5 + i * 3] = '0' + values[i] % 10;
+            frame.rows[0][7 + i * 3] = '0' + values[i] / 10;
+            frame.rows[0][8 + i * 3] = '0' + values[i] % 10;
         }
     }
     return frame;

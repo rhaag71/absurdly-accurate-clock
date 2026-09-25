@@ -2,12 +2,15 @@
 
 namespace clock_display {
 void writeInitialFields(pd2200::Display& display, const Frame& initial) {
-    display.writeField(0, 0, initial.rows[0], 3);       // UTC
-    display.writeField(0, 4, initial.rows[0] + 4, 10); // HH:MM:SS.X
+    display.writeField(0, 3, initial.rows[0] + 3, 3);  // centered UTC
+    display.writeField(0, 7, initial.rows[0] + 7, 10); // HH:MM:SS.X
     display.writeField(1, 0, initial.rows[1], 3);       // GPS
-    display.writeChar(1, 4, initial.rows[1][4]);
+    display.writeChar(1, 3, initial.rows[1][3]);
     display.writeField(1, 6, initial.rows[1] + 6, 3);  // PPS
-    display.writeChar(1, 10, initial.rows[1][10]);
+    display.writeChar(1, 9, initial.rows[1][9]);
+    display.writeField(1, 12, initial.rows[1] + 12, 3); // SAT label
+    display.writeChar(1, 16, initial.rows[1][16]);
+    display.writeChar(1, 17, initial.rows[1][17]);
 }
 void Output::reset(const Frame& displayed) {
     submitted_ = displayed;
