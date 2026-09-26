@@ -15,7 +15,7 @@ struct Decoder {
     unsigned faults=0;
     bool feed(uint8_t byte) {
         if(phase==1) { assert(byte==0x48); phase=2; return false; }
-        if(phase==2) { assert(byte<40);cursor=byte;phase=0;return false; }
+        if(phase==2) { assert(byte<40 && byte!=8);cursor=byte;phase=0;return false; }
         if(byte==0x1b) { phase=1;return false; }
         assert(byte>0x20 && byte<=0x7e);
         if(cursor==8 && drop_zero && byte==0x30) ++faults;
@@ -55,6 +55,8 @@ Frame render(unsigned hour,bool valid=true,unsigned activity=0,
 struct Rig {
     UART uart;
     clock_display::Output output;
+    bool pair_pending=false;
+    uint8_t frozen_ones=0;
     explicit Rig(const Frame& initial):output(uart) {
         output.reset(initial);uart.accepted.screen=uart.physical.screen=initial;
     }
@@ -63,12 +65,25 @@ struct Rig {
         const auto size=uart.bytes.size();
         const auto phase=uart.accepted.phase;
         const auto address=uart.accepted.cursor;
+        const bool was_pending=pair_pending;
         output.service(desired,writable,&event);
         assert(uart.bytes.size()<=size+1);
+        if(was_pending && uart.bytes.size()!=size) {
+            assert(address==8 && uart.bytes.back()==frozen_ones);
+        }
         if(event.valid) {
             assert(uart.bytes.size()==size+1 && phase==0);
             assert(event.address==address && event.payload==uart.bytes.back());
-            assert(event.payload==static_cast<uint8_t>(desired.rows[address/20][address%20]));
+            if(event.hh_pair && event.address==8) {
+                assert(pair_pending && event.complete && event.payload==frozen_ones);
+                pair_pending=false;
+            } else {
+                assert(event.payload==static_cast<uint8_t>(desired.rows[address/20][address%20]));
+                if(event.hh_pair) {
+                    assert(event.address==7 && !event.complete && !pair_pending);
+                    pair_pending=true;frozen_ones=event.hh[1];
+                }
+            }
         } else if(uart.bytes.size()!=size) {
             assert(phase!=0 || uart.bytes.back()==0x1b);
         }
@@ -91,16 +106,16 @@ void exactBytes() {
         auto before=target;before.rows[0][7]=before.rows[0][8]='-';
         Rig r(before);r.settle(target);
         const std::vector<uint8_t> expected={0x1b,0x48,0x07,
-            static_cast<uint8_t>('0'+hour/10),0x1b,0x48,0x08,
+            static_cast<uint8_t>('0'+hour/10),
             static_cast<uint8_t>('0'+hour%10)};
         assert(r.uart.bytes==expected);
         std::printf("HH %02u:",hour);
         for(auto b:r.uart.bytes)std::printf(" %02X",b);
         std::puts("");
     }
-    // The specific 01->00 selection emits exactly one ones-cell command.
+    // The specific 01->00 selection emits one contiguous pair from 07.
     Rig r(render(1));r.settle(render(0));
-    assert((r.uart.bytes==std::vector<uint8_t>{0x1b,0x48,0x08,0x30}));
+    assert((r.uart.bytes==std::vector<uint8_t>{0x1b,0x48,0x07,0x30,0x30}));
 }
 void lossReacquisition() {
     unsigned cases=0;

@@ -61,3 +61,11 @@ space-to-zero behavior.
   a delayed FIFO-fed screen must converge over both rows. Separate fault-injection
   controls distinguish a lost zero (leaves '-') from D3-high (0->8 and 1->9).
   See `docs/hh-zero-investigation.md`; injections do not prove hardware causation.
+
+- `hh_pair_test.cpp` verifies contiguous `ESC H 07 tens ones` for 01->00,
+  11->10, 23->00, invalidation/reacquisition, timezone changes and initial fields.
+  Every transaction boundary is tested with competing label/indicator/status
+  changes, UART refusal, frozen payload retries, and per-byte cache/completion
+  events. Existing HH zero/fuzz tests enforce no explicit position 08 and correct
+  five-byte HH sequences. Fault injections remain demonstrations of downstream
+  faults, not proof that the physical symptom has been repaired.

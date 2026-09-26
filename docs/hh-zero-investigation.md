@@ -1,5 +1,9 @@
 # HH ones zero investigation
 
+The investigation below records the pre-accommodation baseline. The final section
+describes the subsequently implemented paired-HH accommodation; historical byte
+tables and no-production-change statements below refer to that earlier audit.
+
 Follow-up to the earlier HH investigation and timezone UI implementation. Inputs
 are the reported physical 00->08 and 10->18 observations and supplied USB log
 excerpts; no electrical capture or physical device is available to these tests.
@@ -175,3 +179,37 @@ TXHH proves the API accepted the payload and the earlier header, not that the
 wire/device did. Its 1B48 prefix is formatted by the logger, with address/payload
 copied from the command buffer after payload success; it is not a wire sniffer.
 `drop` remains the USB diagnostic queue counter and is NOT a VFD drop count.
+
+
+## Implemented PD-2200 accommodation: contiguous HH
+
+Physical observations include intended 00 rendered as 08 and 10 rendered as 18.
+The exact cause remains unproven. The VFD Output layer now deliberately treats
+HH as one field: either dirty HH cell selects `1B 48 07 tens ones`. This applies
+to timezone/hour changes, invalidation to --, and reacquisition. Startup already
+writes HH contiguously as the beginning of the longer time field at address 07.
+Normal HH updates no longer explicitly address 08, avoiding `1B 48 08 30`.
+This is a Posiflex accommodation, not a change to UTC, PPS, timezone conversion,
+UI, or rolling-indicator semantics. Physical effectiveness still needs bench
+verification; the hardware bug is NOT claimed fixed.
+
+The serializer still accepts at most one UART byte per service call. It refreshes
+both HH payloads until the tens byte succeeds; that accepted tens freezes the
+pair. The ones byte is retried unchanged until accepted, with no intervening
+command. A newer desired hour then generates another pair if needed. Cache cells
+advance individually only on their corresponding successful payload acceptance,
+so a partially submitted pair may temporarily show a mixed cache. If both desired
+characters revert to cache before either payload is accepted, the completed
+position header may still be left without payload, as before.
+
+TXHH now emits once on pair completion:
+`TXHH ms=<ms> pps=<seq> kind=pair bytes=1B4807<tens_hex><ones_hex> want=<HH> cache=<HH> drop=<count>`.
+For example `bytes=1B48073030` is a contiguous 00 write. This records API
+acceptance, not physical acknowledgment; if desired changed mid-pair, `want` can
+differ from the frozen submitted bytes/cache. No per-second logging was added.
+
+The targeted pair test covers requested hour/zone/validity transitions, startup,
+every transaction boundary, rejected tens/ones, concurrent label/decade/status
+changes and accurate completion events/cache. Existing rendered-screen and
+500,000-call fuzz tests now enforce no position-08 command and frozen ones after
+accepted tens. Non-HH single-character update behavior is unchanged.

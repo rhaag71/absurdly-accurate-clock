@@ -110,12 +110,12 @@ void reportDisplay(const clock_display::Frame& desired, const clock_model::Pulse
 void reportAccepted(const clock_display::AcceptedCharacter& accepted,
                     const clock_display::Frame& desired, const clock_model::Pulse& pulse,
                     uint32_t now_ms) {
-    if (!accepted.valid || (accepted.address != 7 && accepted.address != 8)) return;
+    if (!accepted.valid || !accepted.hh_pair || !accepted.complete) return;
     char message[128];
     snprintf(message, sizeof(message),
-        "TXHH ms=%lu pps=%lu bytes=1B48%02X%02X want=%.2s cache=%.2s drop=%lu\r\n",
+        "TXHH ms=%lu pps=%lu kind=pair bytes=1B4807%02X%02X want=%.2s cache=%.2s drop=%lu\r\n",
         static_cast<unsigned long>(now_ms), static_cast<unsigned long>(pulse.sequence),
-        accepted.address, accepted.payload, desired.rows[0] + 7,
+        accepted.hh[0], accepted.hh[1], desired.rows[0] + 7,
         vfd_output.submitted().rows[0] + 7, static_cast<unsigned long>(diagnostic_drops));
     diagnostic(message);
 }

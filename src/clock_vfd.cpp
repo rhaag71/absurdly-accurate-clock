@@ -40,29 +40,49 @@ void Output::service(const Frame& desired, bool writable, AcceptedCharacter* acc
         }
         if (!found) return;
         size_ = 0;
-        encoder_.writeChar(row_, column_, desired.rows[row_][column_]);
+        if (row_ == 0 && (column_ == 7 || column_ == 8)) {
+            // PD-2200 accommodation: never directly address HH ones at 08.
+            // The physical x0 -> x8 root cause remains unproven.
+            column_ = 7;
+            encoder_.writeField(0, 7, desired.rows[0] + 7, 2);
+        } else {
+            encoder_.writeChar(row_, column_, desired.rows[row_][column_]);
+        }
     }
-    // If an edge/phase changed while the position header was in flight, send
-    // the CURRENT character, not the value selected before the delay.
+    const bool hh_pair = size_ == 5;
+    // Refresh before the first payload is accepted, including on retries.
+    // Once HH tens is accepted, freeze BOTH payloads until ones is accepted.
+    // A later desired change is picked up as another complete pair afterward.
     if (next_ == 3) {
         const char value = desired.rows[row_][column_];
-        if (value == submitted_.rows[row_][column_] || value == ' ') {
-            // ESC H position is already a complete command. If phase returned
-            // to the displayed glyph, omit its now-redundant data byte safely.
+        const char ones = hh_pair ? desired.rows[0][8] : 0;
+        const bool unchanged = value == submitted_.rows[row_][column_] &&
+                               (!hh_pair || ones == submitted_.rows[0][8]);
+        if (unchanged || value == ' ' || (hh_pair && ones == ' ')) {
+            // The position header is complete; no payload has been accepted.
             size_ = next_ = 0;
             return;
         }
         command_[3] = static_cast<uint8_t>(value);
+        if (hh_pair) command_[4] = static_cast<uint8_t>(ones);
     }
     if (uart_.write(command_[next_]) != 1) return;
-    if (++next_ == size_) {
+    if (next_ >= 3) {
+        const uint8_t column = column_ + next_ - 3;
+        // Cache each byte actually accepted, including a partially sent HH pair.
+        submitted_.rows[row_][column] = static_cast<char>(command_[next_]);
         if (accepted) {
             accepted->valid = true;
-            accepted->address = command_[2];
-            accepted->payload = command_[3];
+            accepted->address = row_ * columns + column;
+            accepted->payload = command_[next_];
+            accepted->hh_pair = hh_pair;
+            accepted->complete = next_ + 1 == size_;
+            if (hh_pair) {
+                accepted->hh[0] = command_[3];
+                accepted->hh[1] = command_[4];
+            }
         }
-        submitted_.rows[row_][column_] = static_cast<char>(command_[3]);
-        size_ = next_ = 0;
     }
+    if (++next_ == size_) size_ = next_ = 0;
 }
 }

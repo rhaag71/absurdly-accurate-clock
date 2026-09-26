@@ -13,11 +13,16 @@ using clock_display::Output;
 // Every runtime update must consist ONLY of positioned characters: no clear,
 // full-row writes, padding, or NUL content. Binary position 0 is valid.
 void checkUpdates(const std::vector<uint8_t>& bytes) {
-    assert(bytes.size()%4==0);
-    for(size_t i=0;i<bytes.size();i+=4) {
+    for(size_t i=0;i<bytes.size();) {
+        assert(i+4<=bytes.size());
         assert(bytes[i]==0x1b && bytes[i+1]==0x48 && bytes[i+2]<40);
         assert(bytes[i+3]>0x20 && bytes[i+3]<=0x7e);
         const unsigned address=bytes[i+2];
+        assert(address!=8); // HH is always a pair from 07.
+        const unsigned length=address==7 ? 5 : 4;
+        assert(i+length<=bytes.size());
+        if(length==5) assert(bytes[i+4]>0x20 && bytes[i+4]<=0x7e);
+        i+=length;
         assert((address>=3 && address<=5) || (address>=7 && address<=16) ||
                (address>=20 && address<=23) ||
                (address>=26 && address<=29) ||
@@ -92,7 +97,7 @@ int main() {
     changed=clock_display::render(state,pulse,pulse.at_us);
     sink.bytes.clear(); finish(output,changed);
     checkUpdates(sink.bytes);
-    assert(sink.bytes.size()==8*4); // Six UTC digits, decade '-', and PPS '-'.
+    assert(sink.bytes.size()==5+6*4); // HH pair, four other UTC digits, decade '-', and PPS '-'.
 
     state.gps_valid=state.pps_present=state.pps_locked=state.utc_valid=true;
     frame=clock_display::render(state,pulse,pulse.at_us);

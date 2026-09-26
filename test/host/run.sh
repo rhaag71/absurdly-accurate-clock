@@ -22,3 +22,7 @@ c++ -std=c++11 -Wall -Wextra -Werror -I test/host/stubs -I include \
     src/clock_state.cpp src/display_time.cpp src/clock_display.cpp src/pd2200.cpp \
     src/clock_vfd.cpp test/host/hh_zero_test.cpp -o "$test_dir/hh_zero"
 "$test_dir/hh_zero"
+c++ -std=c++11 -Wall -Wextra -Werror -I test/host/stubs -I include \
+    src/clock_state.cpp src/display_time.cpp src/clock_display.cpp src/pd2200.cpp \
+    src/clock_vfd.cpp test/host/hh_pair_test.cpp -o "$test_dir/hh_pair"
+"$test_dir/hh_pair"

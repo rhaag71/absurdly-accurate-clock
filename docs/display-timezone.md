@@ -35,7 +35,7 @@ Existing GPS/PPS transition messages remain. New ASCII records end in CRLF:
 ```text
 ZONE ms=<uptime_ms> zone=<UTC|Eastern|Central|Mountain|Pacific> drop=<count>
 HH ms=<uptime_ms> pps=<sequence> epoch=<UTC_unix_seconds> valid=<0|1> utc=<YYYY-MM-DDTHH:MM:SS> zone=<name> mode=<UTC|STD|DST|?> off=<signed_hours> civil=<YYYY-MM-DDTHH:MM:SS> want=<HH> cache=<HH> drop=<count>
-TXHH ms=<uptime_ms> pps=<sequence> bytes=1B48<address_hex><payload_hex> want=<HH> cache=<HH> drop=<count>
+TXHH ms=<uptime_ms> pps=<sequence> kind=pair bytes=1B4807<tens_hex><ones_hex> want=<HH> cache=<HH> drop=<count>
 ```
 
 `ZONE` records an accepted button press. `HH` records the first frame and every
@@ -44,20 +44,24 @@ cache **before** that loop's output service. Valid=0 makes the calendar/offset
 fields non-authoritative; mode=? and want=-- explicitly mark unavailable time.
 It does not log every second or rolling-indicator update.
 
-`TXHH` records successful HH payload acceptance by UART, with the previously
-accepted header and address, after updating the cache. Addresses 07 and 08 are
-row 0's zero-based hour cells. For example, `bytes=1B480730` means ESC H, address
-07, ASCII `0`; `bytes=1B480838` means address 08, ASCII `8`. Headers can have been
-accepted on earlier loop iterations. A redundant/canceled payload produces no
-TXHH record. Partial HH cache values during a two-character update are expected.
-These are observations of firmware/UART acceptance, **not physical VFD readback**.
+`TXHH` records completion of one contiguous HH pair accepted by UART, after
+updating both cache cells. For example, `bytes=1B48073030` means ESC H, address
+07, ASCII `00`. HH always starts at 07; normal updates never position directly
+at 08. The header/tens can have been accepted on earlier loop iterations. Both
+payloads refresh until tens is accepted, then freeze until ones succeeds. A
+newer desired hour is submitted as another pair afterward. Thus `want` may
+differ from the recorded frozen pair. The cache updates per accepted byte;
+partial cache values in HH records are expected. A canceled header-only command
+produces no TXHH record. These are firmware/UART observations, **not physical
+VFD readback**. See [HH accommodation](hh-zero-investigation.md#implemented-pd-2200-accommodation-contiguous-hh).
 
 Formatting and queueing occur in the main loop only on these events. The bounded
 USB queue is 1024 bytes and drains at most 64 bytes per loop, only when writable.
 Disconnected/full USB never causes a wait: whole records are dropped. `drop` is a
 cumulative counter of dropped diagnostic messages, included in subsequent new
 records; do not treat a capture with drops as a complete transmission history.
-No flash logging, periodic refresh, VFD retry-policy change or HH bug fix is added.
+No flash logging or periodic refresh is added. The paired-HH accommodation
+retains nonblocking retries; its effectiveness requires physical verification.
 
 For the overnight run, capture USB serial at 115200 on the ThinkPad before the
 interesting hour transitions, and keep the connection open. Photograph any bad
