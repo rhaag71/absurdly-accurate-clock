@@ -28,3 +28,36 @@ installation is required. Binaries live in temporary storage.
 Physical glyph mapping, cleared-cell appearance, UART latency and visual quality
 require bench checks. Host tests do not establish the cause of the unit's
 space-to-zero behavior.
+
+- `hh_test.cpp` interprets the runtime byte stream into both 20-cell rows,
+  including payload-free position commands, instead of assuming four-byte groups.
+  It checks all 576 hour pairs at all four command boundaries for both HH cells,
+  the decade cell, and all four status/count cells (16,128 cases), with bounded
+  FIFO draining, writable=false stalls, and write() rejection. Another 10,000
+  seeded repeated transitions cover 08/09/10/18/19/20/23/00/01 without cache resets.
+  All 24 hour edges also run through actual PPS association and calendar conversion
+  to the rendered screen. Full-frame/cache equality is checked after settling;
+  intermediate multi-character updates are intentionally not atomic.
+- Hour-range tests reject RMC hours 24..99, check all authoritative hour edges,
+  and round-trip every hour in 2000..2099. A negative-epoch helper limitation is
+  documented by test; it is not reachable from parser-accepted dates.
+- A separately labelled fault-injection test drops an accepted leading-zero
+  payload and demonstrates persistent visible `28` with intended/cached `08`.
+  This documents missing physical-display feedback, not proof of hardware loss
+  or a reproduction of the reported bug under normal transport assumptions.
+
+- `timezone_test.cpp` covers UTC identity; every standard/daylight offset and label;
+  all zones one second before/at/after fixed 2024–2027 U.S. DST transitions;
+  previous-day/year/leap-day conversion; button bounce/hold/release/cycle/startup
+  and millis wrap; complete rendered zone changes and DST transitions under
+  positioned writes; unchanged authoritative UTC, rolling phases and lower row;
+  acceptance reporting under stalls/rejections/cancellation, and identical byte
+  streams with diagnostics observation enabled or disabled.
+
+- `hh_zero_test.cpp` targets physical x0->x8 reports: exact command bytes for
+  00/01/10/11/20/21, 1,008 partial-command rendered loss/reacquisition cases,
+  300 observed-zone scenarios and 500,000 seeded randomized service calls.
+  An independent accepted-byte decoder must match the cache after every call;
+  a delayed FIFO-fed screen must converge over both rows. Separate fault-injection
+  controls distinguish a lost zero (leaves '-') from D3-high (0->8 and 1->9).
+  See `docs/hh-zero-investigation.md`; injections do not prove hardware causation.

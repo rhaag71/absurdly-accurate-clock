@@ -24,32 +24,40 @@ This follows the [Arduino-Pico PlatformIO instructions](https://arduino-pico.rea
 Do not substitute the original Pico's `pico` board configuration. The explicit
 integration URL avoids relying on ambiguous registry platform support.
 
+## Display timezone button
+
+GP6 (physical pin 9) selects UTC → Eastern → Central → Mountain → Pacific → UTC.
+Connect the button to GND; the internal pull-up is enabled. Each press/release is
+debounced for 30 ms, and holding does not repeat. Reset returns to UTC.
+Authoritative time remains UTC; local time uses contemporary U.S. DST rules only
+at the display boundary. See [timezone and HH diagnostics](docs/display-timezone.md)
+for rules, serial record formats and bench checks.
+
 ## Layout and architecture
 
-- `src/main.cpp`: cooperative application entry point; no clock behavior yet.
+- `src/main.cpp`: cooperative GPS/PPS, button, display and USB diagnostic servicing.
 - `src/hardware.cpp` and `include/hardware.hpp`: UART and input initialization.
 - `src/pd2200.cpp` and `include/pd2200.hpp`: initial Noritake VFD bring-up.
 - `include/pins.hpp`: single source of truth for the GPIO contract.
-- `include/clock_state.hpp`: UTC snapshot, initially invalid and unlocked.
-- `lib/`: future reusable C++ components; `test/`: future behavioral tests.
+- `include/clock_state.hpp`: authoritative UTC timebase, initially invalid and unlocked.
+- `src/display_time.cpp`: presentation-only civil time and contemporary U.S. DST.
+- `src/zone_button.cpp`: non-blocking debounced display-zone selection.
+- `lib/`: future reusable C++ components; `test/`: host regression tests.
 - `Paper-Documents/`: existing PDFs and paper/project documentation. Preserve
   this directory and its contents; it is not generated output or firmware data.
 
-Planned data flow: GPS NMEA/UBX supplies UTC epoch/time data; PPS supplies the
-precise second boundary. A future timekeeper must associate messages with the
-correct pulse and handle validity, signal loss and leap seconds before claiming
-synchronization. Canonical time stays UTC; any local-time formatting belongs at
-the display boundary. There is no timing-accuracy claim in this scaffold.
+GPS RMC labels are associated with PPS edges by the UTC timebase. Canonical time
+stays UTC; local-time conversion belongs at the display boundary. See
+[timebase contract](docs/pps-timebase.md) for association and validity behavior.
 
 The display module sends Posiflex PD-2200 commands in **Noritake mode**
 over UART1 through the MAX3232. Select Noritake mode and 9600 baud, 8N1 on the
 actual display. Startup waits 500 ms, sends reset (`ESC I`), waits 100 ms,
 disables the cursor (`16` hex), sets minimum brightness (`1B 4C 3F` hex),
 then clears (`0E` hex) and homes (`0C` hex). Direct cursor positioning
-(`ESC H 00` / `ESC H 14`, addresses in hex) precedes each 20-byte row:
-`ABSURD CLOCK        ` and `PICO 2 ONLINE       `. Compile-time checks enforce
-the row lengths; no terminators or newlines are sent to the VFD. USB Serial
-reports when transmission completes, without waiting for a USB host.
+(`ESC H`, zero-based cell address) precedes short initialized fields and changed
+characters. The display shows the selected zone, HH:MM:SS and PPS-synchronized
+rolling decade, with GPS/PPS/SAT on the lower row. No USB host is required.
 Future ESP32 integration receives
 UTC/time status over SPI1 plus a TIME_SYNC boundary output; protocol, SPI role,
 pulse width and IRQ direction remain to be specified. No ESP32/NTP code yet.
@@ -75,7 +83,7 @@ The **DB9 pin 2 to pin 3 crossover is required** for this tested module/display
 combination. The PD-2200 is powered separately and configured for Noritake mode,
 9600 baud, 8N1. These labeling and wiring findings apply to the tested module.
 The temporary continuous-`U` diagnostic firmware has been removed; normal
-firmware sends the two startup rows described above.
+firmware sends the clock/status fields described above.
 
 ## GPIO contract
 
@@ -101,5 +109,4 @@ input/output directions are relative to the Pico.
 GP3 and GP7 are also unassigned. Reserved expansion pins are not initialized.
 Both UARTs currently use **9600 baud, 8N1**, explicit bring-up assumptions in
 `src/main.cpp`; confirm them against the GPS configuration and VFD switches.
-USB `Serial` is separate from both hardware UARTs. PPS capture, GPS parsing,
-button handling, display formatting and SPI transfer are intentionally pending.
+USB `Serial` is separate from both hardware UARTs. SPI integration remains pending.

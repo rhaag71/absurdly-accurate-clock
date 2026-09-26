@@ -14,7 +14,7 @@ void begin(unsigned long gps_baud, unsigned long vfd_baud) {
     Serial2.begin(vfd_baud, SERIAL_8N1);
 
     pinMode(pins::gps_pps, INPUT);
-    pinMode(pins::ui_button, INPUT_PULLUP); // Assumes button connects GP6 to GND.
+    pinMode(pins::ui_button, INPUT_PULLUP); // Active-low GP6 (physical pin 9) button to GND; internal pull-up.
     // Reserved SPI/TIME_SYNC/IRQ pins remain at reset defaults until implemented.
 }
 }

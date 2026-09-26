@@ -175,6 +175,40 @@ void parserTests() {
     assert(feed("$"+std::string(200,'x')+"\n")==Result::none);
     assert(feed("$partial"+sentence("GPRMC,030127,A,,,,,,,230926"))==Result::valid_rmc);
 }
+void hourRangeTests() {
+    // Every representable two-digit RMC hour, including observed 28 and 84.
+    for(unsigned h=0;h<100;++h) {
+        char body[80]; snprintf(body,sizeof(body),"GPRMC,%02u1601,A,,,,,,,250926",h);
+        nmea::RmcParser parser; nmea::Utc utc; char status='?';
+        auto result=Result::none;
+        for(char c:sentence(body)) {
+            const auto r=parser.receive(c,utc,status);
+            if(r!=Result::none) result=r;
+        }
+        assert(result==(h<24 ? Result::valid_rmc : Result::invalid_rmc));
+        if(h<24) assert(utc.hour==h);
+    }
+    // All hour edges through real association and authoritative epoch advance.
+    for(unsigned h=0;h<24;++h) {
+        Rig r; r.acquire(date(2026,9,25,h,59,57));
+        assert(r.clock.state().utc.hour==h);
+        r.label(r.clock.state().utc); r.edge();
+        assert(r.clock.state().utc.hour==(h+1)%24);
+        const auto f=clock_display::render(r.clock.state());
+        assert(f.rows[0][7]==static_cast<char>('0'+((h+1)%24)/10));
+        assert(f.rows[0][8]==static_cast<char>('0'+((h+1)%24)%10));
+    }
+    // Every day/hour of the parser's 2000..2099 century; date round trips.
+    const auto end=toUnix(date(2100,1,1,0,0,0));
+    for(auto t=toUnix(date(2000,1,1,0,0,0));t<end;t+=3600) {
+        const auto u=fromUnix(t);
+        assert(u.hour<24 && u.minute==0 && u.second==0);
+        assert(toUnix(u)==t);
+    }
+    // Public helper has no negative-epoch contract/guard: signed remainder
+    // narrows to uint8_t. This is unreachable from accepted RMC dates.
+    assert(fromUnix(-3600).hour==255);
+}
 void satelliteTests() {
     nmea::GgaParser parser;
     uint8_t count=0;
@@ -305,6 +339,6 @@ void decadeTests() {
     assert(rollingDecade(rig.clock.state(),{},rig.now)=='-');
 }
 int main() {
-    parserTests(); satelliteTests(); rollovers(); association(); losses(); displayTests(); paddingTests(); decadeTests();
+    parserTests(); hourRangeTests(); satelliteTests(); rollovers(); association(); losses(); displayTests(); paddingTests(); decadeTests();
     puts("All clock/parser/display host tests passed");
 }

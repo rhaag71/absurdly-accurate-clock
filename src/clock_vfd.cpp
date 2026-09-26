@@ -21,12 +21,13 @@ size_t Output::write(uint8_t byte) {
     command_[size_++] = byte;
     return 1;
 }
-void Output::service(const Frame& desired, bool writable) {
+void Output::service(const Frame& desired, bool writable, AcceptedCharacter* accepted) {
+    if (accepted) accepted->valid = false;
     if (!writable) return; // No command selection/queueing while backpressured.
     if (next_ == 0) {
         const auto update = difference(submitted_, desired);
         bool found = false;
-        // Clock digits before indicator, then status. Static labels never change.
+        // Zone label and clock digits before indicator, then status.
         for (uint8_t row = 0; row < 2 && !found; ++row) {
             for (uint8_t col = 0; col < columns; ++col) {
                 if (update.positions[row] & (1u << col)) {
@@ -55,6 +56,11 @@ void Output::service(const Frame& desired, bool writable) {
     }
     if (uart_.write(command_[next_]) != 1) return;
     if (++next_ == size_) {
+        if (accepted) {
+            accepted->valid = true;
+            accepted->address = command_[2];
+            accepted->payload = command_[3];
+        }
         submitted_.rows[row_][column_] = static_cast<char>(command_[3]);
         size_ = next_ = 0;
     }

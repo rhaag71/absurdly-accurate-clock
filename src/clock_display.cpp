@@ -20,7 +20,7 @@ char rollingDecade(const clock_model::State& state, const clock_model::Pulse& pu
     return static_cast<char>('0' + (step < 9 ? step : 9));
 }
 Frame render(const clock_model::State& state, const clock_model::Pulse& pulse,
-             uint32_t now_us) {
+             uint32_t now_us, presentation::DisplayZone zone) {
     Frame frame;
     std::memcpy(frame.rows[0] + 3, "UTC", 3);
     std::memcpy(frame.rows[0] + 7, "--:--:--.", 9);
@@ -33,11 +33,19 @@ Frame render(const clock_model::State& state, const clock_model::Pulse& pulse,
     frame.rows[1][16] = state.satellites.valid ? static_cast<char>('0' + state.satellites.used / 10) : '-';
     frame.rows[1][17] = state.satellites.valid ? static_cast<char>('0' + state.satellites.used % 10) : '-';
     if (state.utc_valid) {
-        const unsigned values[] = {state.utc.hour, state.utc.minute, state.utc.second};
+        const auto time = presentation::convertUtcForDisplay(state.utc, zone);
+        std::memcpy(frame.rows[0] + 3, time.label, 3);
+        const unsigned values[] = {time.civil.hour, time.civil.minute, time.civil.second};
         for (unsigned i = 0; i < 3; ++i) {
             frame.rows[0][7 + i * 3] = '0' + values[i] / 10;
             frame.rows[0][8 + i * 3] = '0' + values[i] % 10;
         }
+    }
+    if (!state.utc_valid) {
+        // Without a valid date DST cannot be determined: show selected region,
+        // not an unjustified standard/daylight abbreviation.
+        const char* unavailable[] = {"UTC", "E--", "C--", "M--", "P--"};
+        std::memcpy(frame.rows[0] + 3, unavailable[static_cast<unsigned>(zone)], 3);
     }
     return frame;
 }

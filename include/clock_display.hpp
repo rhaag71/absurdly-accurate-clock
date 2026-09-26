@@ -1,5 +1,6 @@
 #pragma once
 #include "clock_state.hpp"
+#include "display_time.hpp"
 
 namespace clock_display {
 constexpr unsigned columns = 20;
@@ -15,7 +16,8 @@ struct Frame {
 char rollingDecade(const clock_model::State& state, const clock_model::Pulse& pulse,
                    uint32_t now_us);
 Frame render(const clock_model::State& state, const clock_model::Pulse& pulse = {},
-             uint32_t now_us = 0);
+             uint32_t now_us = 0,
+             presentation::DisplayZone zone = presentation::DisplayZone::utc);
 struct Update {
     uint32_t positions[2] = {}; // Changed occupied cells only; never padding.
 };
