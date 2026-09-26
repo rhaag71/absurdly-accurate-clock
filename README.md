@@ -50,6 +50,12 @@ GPS RMC labels are associated with PPS edges by the UTC timebase. Canonical time
 stays UTC; local-time conversion belongs at the display boundary. See
 [timebase contract](docs/pps-timebase.md) for association and validity behavior.
 
+The reference physical build uses a Posiflex PD-2200 serial VFD, but that display
+is not fundamental to the clock architecture: the UTC timekeeping core is
+independent of it. The current VFD layer is hardware-specific and can be replaced
+or adapted for another serial/UART or embedded display; reproducing the project
+does not require finding the same Posiflex model.
+
 The display module sends Posiflex PD-2200 commands in **Noritake mode**
 over UART1 through the MAX3232. Select Noritake mode and 9600 baud, 8N1 on the
 actual display. Startup waits 500 ms, sends reset (`ESC I`), waits 100 ms,
@@ -58,11 +64,12 @@ then clears (`0E` hex) and homes (`0C` hex). Direct cursor positioning
 (`ESC H`, zero-based cell address) precedes short initialized fields and changed
 characters. The display shows the selected zone, HH:MM:SS and PPS-synchronized
 rolling decade, with GPS/PPS/SAT on the lower row. No USB host is required.
-Future ESP32 integration receives
-UTC/time status from the Pico SPI1 peripheral plus a qualified TIME_SYNC output.
-[Protocol v1](docs/clock-network-protocol.md) specifies the corrected wiring,
-40-byte CRC-protected packet and phase-delay correction. ESP32 firmware remains
-a separate future project; nothing received can change Pico time.
+The companion [aac-time-bridge](https://github.com/rhaag71/aac-time-bridge) is an
+ESP32 network-time/NTP appliance that consumes the Pico's SPI protocol and
+qualified TIME_SYNC signal. The Pico remains the authoritative timekeeper and
+runs standalone without the ESP32. [Protocol v1](docs/clock-network-protocol.md)
+specifies the wiring, packet and phase-delay semantics; nothing received from the
+ESP32 can change Pico time.
 
 ## Verified VFD wiring
 
