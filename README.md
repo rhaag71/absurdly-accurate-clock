@@ -59,8 +59,10 @@ then clears (`0E` hex) and homes (`0C` hex). Direct cursor positioning
 characters. The display shows the selected zone, HH:MM:SS and PPS-synchronized
 rolling decade, with GPS/PPS/SAT on the lower row. No USB host is required.
 Future ESP32 integration receives
-UTC/time status over SPI1 plus a TIME_SYNC boundary output; protocol, SPI role,
-pulse width and IRQ direction remain to be specified. No ESP32/NTP code yet.
+UTC/time status from the Pico SPI1 peripheral plus a qualified TIME_SYNC output.
+[Protocol v1](docs/clock-network-protocol.md) specifies the corrected wiring,
+40-byte CRC-protected packet and phase-delay correction. ESP32 firmware remains
+a separate future project; nothing received can change Pico time.
 
 ## Verified VFD wiring
 
@@ -98,15 +100,15 @@ input/output directions are relative to the Pico.
 | GP4 | PD-2200 UART1 TX (`Serial2`) via MAX3232 |
 | GP5 | UART1 RX, reserved and disabled |
 | GP6 | UI button input; pull-up, button to GND |
-| GP8 | Reserved SPI1 MISO |
-| GP9 | Reserved SPI1 CS |
-| GP10 | Reserved SPI1 SCK |
-| GP11 | Reserved SPI1 MOSI |
-| GP12 | Reserved TIME_SYNC output |
+| GP8 | SPI1 RX input / ESP32 MOSI -> Pico (header 11) |
+| GP9 | SPI1 CSn input from ESP32 (header 12) |
+| GP10 | SPI1 SCK input from ESP32 (header 14) |
+| GP11 | SPI1 TX output / Pico -> ESP32 MISO (header 15) |
+| GP12 | Qualified TIME_SYNC output (header 16) |
 | GP13 | Reserved future ESP32 control/IRQ |
 | GP14–GP22 | Open for future expansion |
 
-GP3 and GP7 are also unassigned. Reserved expansion pins are not initialized.
+GP3 and GP7 are also unassigned. GP13 remains reserved and is not initialized. SPI1 uses native hardware, not PIO.
 Both UARTs currently use **9600 baud, 8N1**, explicit bring-up assumptions in
 `src/main.cpp`; confirm them against the GPS configuration and VFD switches.
-USB `Serial` is separate from both hardware UARTs. SPI integration remains pending.
+USB `Serial` is separate from both hardware UARTs. The network interface works without a connected SPI controller.

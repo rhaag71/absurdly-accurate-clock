@@ -1,0 +1,24 @@
+[
+  {
+    "name": "invalid",
+    "hex": "41435431012800000100000000000000000000000000000000000000ffffffffff0000006ce7d7c1",
+    "sequence": 1,
+    "boundary": 0,
+    "epoch": 0,
+    "flags": 0,
+    "sync_sequence": 0,
+    "sync_delay_us": 4294967295,
+    "satellites": 255
+  },
+  {
+    "name": "beyond_2038",
+    "hex": "4143543101286f0078563412040302010200000001000000090000007b0000000c00000097fba1d6",
+    "sequence": 305419896,
+    "boundary": 16909060,
+    "epoch": 4294967298,
+    "flags": 111,
+    "sync_sequence": 9,
+    "sync_delay_us": 123,
+    "satellites": 12
+  }
+]

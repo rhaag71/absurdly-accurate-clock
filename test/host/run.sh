@@ -26,3 +26,10 @@ c++ -std=c++11 -Wall -Wextra -Werror -I test/host/stubs -I include \
     src/clock_state.cpp src/display_time.cpp src/clock_display.cpp src/pd2200.cpp \
     src/clock_vfd.cpp test/host/hh_pair_test.cpp -o "$test_dir/hh_pair"
 "$test_dir/hh_pair"
+c++ -std=c++11 -Wall -Wextra -Werror -I include \
+    src/clock_state.cpp src/network_protocol.cpp test/host/network_test.cpp -o "$test_dir/network"
+"$test_dir/network"
+c++ -std=c++11 -Wall -Wextra -Werror -I test/host/network_stubs -I include \
+    src/network_protocol.cpp src/network_interface.cpp test/host/network_transport_test.cpp \
+    -o "$test_dir/network_transport"
+"$test_dir/network_transport"

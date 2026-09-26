@@ -69,3 +69,13 @@ space-to-zero behavior.
   events. Existing HH zero/fuzz tests enforce no explicit position 08 and correct
   five-byte HH sequences. Fault injections remain demonstrations of downstream
   faults, not proof that the physical symptom has been repaired.
+
+- `network_test.cpp` verifies v1's exact 40-byte layout, independent CRC golden
+  vectors, corruption/header rejection, signed 64-bit epochs, quality/satellite
+  flags, inactive holdover, publication sequence/coherence, invalid/sync gating,
+  and observation of actual Timebase acquisition/second edges without mutation.
+- `network_transport_test.cpp` compiles the production native SPI1 transport with
+  a register/FIFO model to check immutable CS snapshots at every byte split,
+  short/extra/stalled transactions, subsequent realignment, TIME_SYNC qualification,
+  ignored MOSI, and summary counters. Hardware electrical timing is not modeled.
+- Portable ESP32-side reference vectors are in `host/network-v1-vectors.json`.

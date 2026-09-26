@@ -8,6 +8,7 @@
 #include "pins.hpp"
 #include "hardware.hpp"
 #include "pd2200.hpp"
+#include "network_interface.hpp"
 
 namespace {
 constexpr unsigned long gps_baud = 9600; // Confirm against the GPS configuration.
@@ -142,6 +143,7 @@ void setup() {
     Serial2.flush();
     diagnostic("GPS/PPS UTC clock; RMC labels preceding PPS\r\n");
     zone_button.begin(digitalRead(pins::ui_button) == LOW, millis());
+    clock_network::begin();
     last_service_us = micros();
 
 }
@@ -205,6 +207,9 @@ void loop() {
     timebase.poll(pulse, now_us);
     timebase.satelliteStatus().poll(now_us);
     reportTransitions();
+    clock_network::service(timebase.state(), pulse);
+    char net_message[224];
+    if (clock_network::diagnostic(net_message, sizeof(net_message), now)) diagnostic(net_message);
     const auto desired = clock_display::render(timebase.state(), pulse, now_us, zone_button.zone());
     reportDisplay(desired, pulse, now, zone_changed);
     clock_display::AcceptedCharacter accepted;
