@@ -56,6 +56,17 @@ void Output::service(const Frame& desired, bool writable, AcceptedCharacter* acc
     if (next_ == 3) {
         const char value = desired.rows[row_][column_];
         const char ones = hh_pair ? desired.rows[0][8] : 0;
+        if (!hh_pair && row_ == 0 && column_ == decade_column && value == '0') {
+            // At a PPS boundary, do not refresh an in-flight decade header to
+            // zero ahead of the new second. Let changed clock digits submit
+            // first; Output's normal left-to-right selection sends zero next.
+            for (uint8_t col = 7; col <= 14; ++col) {
+                if (desired.rows[0][col] != submitted_.rows[0][col]) {
+                    size_ = next_ = 0; // Header is complete; a new address follows.
+                    return;
+                }
+            }
+        }
         const bool unchanged = value == submitted_.rows[row_][column_] &&
                                (!hh_pair || ones == submitted_.rows[0][8]);
         if (unchanged || value == ' ' || (hh_pair && ones == ' ')) {

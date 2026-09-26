@@ -125,6 +125,25 @@ int main() {
     sink.bytes.clear();
     finish(output,clock_display::render(state,pulse,pulse.at_us+550000));
     assert((sink.bytes==std::vector<uint8_t>{0x1b,0x48,16,'2'}));
+    // If the previous second's decade address is in flight at the PPS edge,
+    // its refreshed zero must follow the changed whole-second glyph.
+    auto boundary_state=state;boundary_state.utc.second=10;
+    clock_model::Pulse boundary_pulse=pulse;boundary_pulse.at_us=10000000;
+    const auto at8=clock_display::render(boundary_state,boundary_pulse,boundary_pulse.at_us+850000);
+    const auto at9=clock_display::render(boundary_state,boundary_pulse,boundary_pulse.at_us+900000);
+    assert(std::memcmp(at8.rows[0]+13,"10.8",4)==0);
+    assert(std::memcmp(at9.rows[0]+13,"10.9",4)==0);
+    Output boundary_output(sink);boundary_output.reset(at8);sink.bytes.clear();
+    for(unsigned i=0;i<3;++i)boundary_output.service(at9,true); // ESC H <indicator>
+    assert((sink.bytes==std::vector<uint8_t>{0x1b,0x48,16}));
+    boundary_state.utc.second=11;++boundary_pulse.sequence;boundary_pulse.at_us+=1000000;
+    const auto atBoundary=clock_display::render(boundary_state,boundary_pulse,boundary_pulse.at_us);
+    assert(std::memcmp(atBoundary.rows[0]+13,"11.0",4)==0);
+    boundary_output.service(atBoundary,true); // Abandon the pending old-second zero.
+    assert((sink.bytes==std::vector<uint8_t>{0x1b,0x48,16}));
+    finish(boundary_output,atBoundary);
+    assert((sink.bytes==std::vector<uint8_t>{0x1b,0x48,16,
+        0x1b,0x48,14,'1',0x1b,0x48,16,'0'}));
     // Hold .0 without traffic for 500 ms, then produce nine changes and hold .9.
     output.reset(clock_display::render(state,pulse,pulse.at_us)); sink.bytes.clear();
     for(unsigned ms=0;ms<1000;++ms) {
