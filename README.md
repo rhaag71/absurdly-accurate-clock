@@ -112,3 +112,7 @@ GP3 and GP7 are also unassigned. GP13 remains reserved and is not initialized. S
 Both UARTs currently use **9600 baud, 8N1**, explicit bring-up assumptions in
 `src/main.cpp`; confirm them against the GPS configuration and VFD switches.
 USB `Serial` is separate from both hardware UARTs. The network interface works without a connected SPI controller.
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
