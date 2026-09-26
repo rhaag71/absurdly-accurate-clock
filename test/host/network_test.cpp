@@ -44,7 +44,7 @@ void snapshots() {
     assert(p.snapshot().flags==(gps_valid|pps_present));
     s.utc_valid=s.pps_locked=true;s.utc_seconds=2200000000LL;
     ++pulse.sequence;pulse.at_us+=1000000;
-    assert(p.needsSync(s,pulse,pulse.at_us+123));p.emitted(123);assert(p.update(s,pulse));
+    assert(p.needsSync(s,pulse,pulse.at_us+123));p.emitted(pulse.sequence,123,s.utc_seconds);assert(p.update(s,pulse));
     assert(p.snapshot().flags==(gps_valid|pps_present|pps_locked|utc_valid|sync_valid));
     assert(p.snapshot().epoch==s.utc_seconds && p.snapshot().sync_sequence==1);
     assert(!p.needsSync(s,pulse,pulse.at_us+124));assert(!p.update(s,pulse));
@@ -54,7 +54,7 @@ void snapshots() {
     Mailbox mailbox;mailbox.publish(encode(p.snapshot()));const auto in_flight=mailbox.latch();
     for(unsigned i=0;i<1000;++i) {
         ++pulse.sequence;++s.utc_seconds;pulse.at_us+=1000000;
-        assert(p.needsSync(s,pulse,pulse.at_us+20));p.emitted(20);assert(p.update(s,pulse));
+        assert(p.needsSync(s,pulse,pulse.at_us+20));p.emitted(pulse.sequence,20,s.utc_seconds);assert(p.update(s,pulse));
         mailbox.publish(encode(p.snapshot()));Snapshot d;assert(decode(mailbox.latch(),d));
         assert(d.epoch==epoch+i+1 && d.boundary==pulse.sequence && !(d.flags&holdover));
         assert(decode(in_flight,d));assert(d.epoch==epoch);
@@ -68,9 +68,9 @@ void snapshots() {
     // Boundary counter and microsecond timestamp wrap do not duplicate pulses.
     Publisher wrapped;s.utc_valid=s.pps_locked=true;
     pulse.sequence=UINT32_MAX;pulse.at_us=UINT32_MAX-10;
-    assert(wrapped.needsSync(s,pulse,9));wrapped.emitted(20);wrapped.update(s,pulse);
+    assert(wrapped.needsSync(s,pulse,9));wrapped.emitted(pulse.sequence,20,s.utc_seconds);wrapped.update(s,pulse);
     pulse.sequence=0;pulse.at_us+=1000000;++s.utc_seconds;
-    assert(wrapped.needsSync(s,pulse,pulse.at_us+20));wrapped.emitted(20);wrapped.update(s,pulse);
+    assert(wrapped.needsSync(s,pulse,pulse.at_us+20));wrapped.emitted(pulse.sequence,20,s.utc_seconds);wrapped.update(s,pulse);
     assert(wrapped.snapshot().boundary==0 && wrapped.snapshot().sync_sequence==2);
     assert(!wrapped.needsSync(s,pulse,pulse.at_us+21));
 }
@@ -82,7 +82,7 @@ void authoritative() {
         pulse.seen=true;pulse.sequence=edge;pulse.at_us=edge*1000000;
         clock.poll(pulse,pulse.at_us);
         const auto before=clock.state();
-        if(observer.needsSync(before,pulse,pulse.at_us+20))observer.emitted(20);
+        if(observer.needsSync(before,pulse,pulse.at_us+20))observer.emitted(pulse.sequence,20,before.utc_seconds);
         observer.update(before,pulse);
         assert(clock.state().utc_seconds==before.utc_seconds);
         assert(clock.state().utc_valid==before.utc_valid);

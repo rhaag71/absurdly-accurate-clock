@@ -47,9 +47,13 @@ bool Publisher::needsSync(const clock_model::State& s,const clock_model::Pulse& 
     seen_=true;examined_=p.sequence;
     if(!s.utc_valid||!s.pps_locked||!s.pps_present)return false;
     if(uint32_t(now-p.at_us)>5000) {++skipped_;return false;}
-    sync_boundary_=p.sequence;sync_epoch_=s.utc_seconds;return true;
+    return true;
 }
-void Publisher::emitted(uint32_t delay) {++sync_count_;delay_=delay;}
+void Publisher::emitted(uint32_t boundary,uint32_t delay,int64_t epoch) {
+    // Keep the edge count and its identity/delay as one commit operation.
+    ++sync_count_;sync_boundary_=boundary;sync_epoch_=epoch;delay_=delay;
+}
+void Publisher::suppressed() {++skipped_;}
 bool Publisher::update(const clock_model::State& s,const clock_model::Pulse& p) {
     Snapshot next;
     next.flags=(s.gps_valid?gps_valid:0)|(s.pps_present?pps_present:0)|

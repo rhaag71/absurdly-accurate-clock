@@ -5,7 +5,7 @@
 #include <cstdio>
 #include <cstring>
 namespace fake {
-Hardware hw;uint32_t now=0;bool levels[30]={};
+Hardware hw;uint32_t now=0,time_reads=0,advance_on_read=0,advance_by=0;bool levels[30]={};
 void (*callbacks[30])()={};void (*irq)()=nullptr;unsigned rises=0;
 }
 void select(bool low) {fake::levels[9]=!low;fake::callbacks[9]();}
@@ -31,6 +31,20 @@ int main() {
     s.utc_seconds=2200000000LL;s.satellites.valid=true;s.satellites.used=12;
     clock_model::Pulse p;p.seen=true;p.sequence=1;p.at_us=1000000;
     fake::now=p.at_us+20;service(s,p);assert(fake::rises==1 && fake::levels[12]);
+    auto successful=read();Snapshot prior;assert(decode(successful,prior));
+    assert(prior.flags&sync_valid);assert(prior.sync_sequence==1 && prior.sync_delay==20);
+    // The next boundary passes needsSync()'s initial check, then crosses the
+    // deadline on service()'s final time read. It must not inherit this edge.
+    ++p.sequence;++s.utc_seconds;p.at_us+=1000000;fake::now=p.at_us+4990;
+    fake::advance_on_read=fake::time_reads+2;fake::advance_by=20;
+    const auto before_race_edges=fake::rises;
+    service(s,p);fake::advance_on_read=0;
+    assert(fake::rises==before_race_edges && !fake::levels[12]);
+    assert(decode(read(),d));assert(d.boundary==p.sequence && d.epoch==s.utc_seconds);
+    assert(!(d.flags&sync_valid));assert(d.sync_delay==UINT32_MAX);
+    assert(d.sync_sequence==prior.sync_sequence);
+    char text[224];assert(diagnostic(text,sizeof(text),0));assert(std::strstr(text,"NET v1"));
+    assert(diagnostic(text,sizeof(text),60000));assert(std::strstr(text,"skipped=1"));
     fake::now+=200;service(s,p);assert(fake::rises==1 && !fake::levels[12]);
     for(unsigned split=0;split<=40;++split) {
         Packet frame;select(true);
@@ -57,8 +71,7 @@ int main() {
     // Model receiver overrun: diagnostic only, then reset/recover at next CS.
     select(true);fake::hw.dr.rx.assign(8,0x5a);fake::hw.ris=SPI_SSPRIS_RORRIS_BITS;
     select(false);assert(decode(read(),d));
-    char text[224];assert(diagnostic(text,sizeof(text),0));assert(std::strstr(text,"NET v1"));
-    assert(!diagnostic(text,sizeof(text),59999));assert(diagnostic(text,sizeof(text),60000));
-    assert(std::strstr(text,"short=42") && std::strstr(text,"extra=1") && std::strstr(text,"over=1"));
+    assert(!diagnostic(text,sizeof(text),119999));assert(diagnostic(text,sizeof(text),120000));
+    assert(std::strstr(text,"short=42") && std::strstr(text,"extra=1") && std::strstr(text,"over=1") && std::strstr(text,"skipped=2"));
     puts("Native SPI1 register-model framing/abort/snapshot/TIME_SYNC tests passed");
 }

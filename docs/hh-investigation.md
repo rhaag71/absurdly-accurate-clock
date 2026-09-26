@@ -1,6 +1,16 @@
 # Impossible HH investigation
 
-Investigation of the current repository; production code unchanged.
+> **Historical baseline, superseded in presentation and VFD details.** This
+> investigation records the UTC-only renderer and single-character command
+> architecture that existed when it was written. The current renderer applies
+> display-zone conversion in `src/display_time.cpp` / `src/clock_display.cpp`,
+> and `src/clock_vfd.cpp` uses contiguous paired-HH writes plus current
+> diagnostics. The findings about authoritative UTC range and the limits of
+> UART-acceptance evidence remain historical investigation results; recheck the
+> linked source before treating any implementation description below as current.
+
+Investigation of the then-current repository; production code unchanged at that
+time.
 
 ## Data path
 
@@ -10,8 +20,9 @@ applies confirmed labels or increments the authoritative epoch on new PPS edges;
 it derives state.utc with fromUnix. All state/render/output work is in the main
 loop; the ISR only updates the separately snapshotted PPS capture.
 
-render builds a fresh frame. Hour division/modulo produces zero-padded characters
-at row 0 columns 7 and 8 (physical columns 8 and 9). There is no timezone conversion.
+At that baseline, render built a fresh UTC-only frame. Hour division/modulo
+produced zero-padded characters at row 0 columns 7 and 8 (physical columns 8
+and 9). There was no timezone conversion.
 The renderer trusts utc_valid and does not independently range-check the hour.
 difference compares each occupied character with Output::submitted_, including
 leading zeroes. Spaces are deliberately excluded, but HH is digits or dashes.

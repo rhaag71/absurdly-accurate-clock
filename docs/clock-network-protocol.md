@@ -19,9 +19,10 @@ ESP32 is controller. GPIO numbers are not physical header numbers.
 | GP12 | 16 | output | TIME_SYNC |
 | GP13 | 17 | reserved | future control/IRQ, not initialized |
 
-This corrects older master-oriented MISO/MOSI labels. TX/RX directions do not
-swap in slave mode. GP9 has an internal pull-up; SCK/MOSI have pull-downs for an
-absent controller. TIME_SYNC starts low. MISO is hardware-tristated when CS high.
+This corrects the earlier wiring draft's controller-oriented MISO/MOSI labels.
+TX/RX directions do not swap in peripheral mode. GP9 has an internal pull-up;
+SCK/MOSI have pull-downs for an absent controller. TIME_SYNC starts low. MISO
+is hardware-tristated when CS is high.
 Do not drive unpowered boards through their IO; arrange shared power sequencing
 or isolation where independent power is needed.
 
@@ -45,7 +46,7 @@ are counted as malformed; sub-byte tails cannot always be counted by this SPI
 peripheral. Stop after 40 bytes: surplus output is unspecified, not another packet.
 After 48 received bytes transport interrupts are disabled until CS rises, bounding
 service for a stuck/overclocking controller. A CS held low without clocks does not
-block the main loop. No busy waits on master activity, DMA, or PIO are used.
+block the main loop. No busy waits on controller activity, DMA, or PIO are used.
 
 ## Packet layout (40 bytes)
 
@@ -89,6 +90,12 @@ low at the first main-loop service at least 100 us later; pulse width is not a
 precision quantity. Invalid UTC produces no new rising edges. Existing RMC/PPS
 association remains the sole authority; RMC arrival never triggers this signal.
 Late processing suppresses that edge rather than emitting a misleading late pulse.
+The publisher commits boundary/epoch identity, delay and emitted-edge sequence
+only after the final deadline check and GPIO rising write succeed. If the final
+timer read crosses 5000 us, the edge is suppressed, the skipped count increases,
+and the newly published authoritative boundary has SYNC_VALID clear and
+sync_delay_us set to FFFFFFFF. `sync_sequence` remains the cumulative count of
+edges actually emitted; it does not imply that the current boundary was emitted.
 
 The rising edge is a software-delivered boundary reference, NOT a packet-ready
 strobe and NOT a zero-latency electrical copy of GPS PPS. The packet epoch identifies
@@ -110,8 +117,9 @@ Do not associate a packet fetched across the next TIME_SYNC edge with the wrong
 edge: timestamp/count both edges and CS start, or discard/retry ambiguous reads.
 
 SYNC_VALID remains set only for the current valid boundary and matching epoch
-for which a pulse was emitted. On invalidation the packet clears it and sets
-sync_delay_us to FFFFFFFF; sync_sequence retains its count. An invalid packet's
+for which a pulse was emitted. On invalidation or a suppressed edge the packet
+clears it and sets sync_delay_us to FFFFFFFF; sync_sequence retains its count.
+An invalid packet's
 zero epoch is a sentinel, not 1970 time. On recovery only a subsequent qualified
 boundary emits a pulse. Every new PPS sequence or quality/count/epoch change
 publishes a new coherent packet; no SPI read increments packet_sequence.
@@ -138,7 +146,7 @@ repurposed in v1. Future HOLDOVER needs a specified uncertainty/age model and
 consumer policy before activation. GP13 has no role in v1.
 
 Hardware references: RP2350 datasheet sections 1.2.3 and 12.3 (mode 1 continuous
-frames, fixed TX/RX directions, slave CS tristate); installed Arduino-Pico
+frames, fixed TX/RX directions, peripheral CS tristate); installed Arduino-Pico
 SPISlave and Pico SDK hardware_spi sources. Bench validation with an actual SPI
 controller is required for CS setup/hold, byte alignment after aborts, electrical
 levels, and TIME_SYNC offset/jitter. Host tests cannot certify these timings.

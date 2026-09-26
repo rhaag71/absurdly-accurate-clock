@@ -211,6 +211,8 @@ Each new assertion resets peripheral framing and FIFO state. Short, extra, and a
 
 TIME_SYNC is a software-delivered announcement of a newly processed authoritative boundary. It rises only when UTC is valid, PPS is present and locked, and the elapsed time from the captured PPS timestamp is at most 5000 µs. A late boundary suppresses the edge instead of presenting it as timely. It returns low at the first service call at least 100 µs later; pulse width is not a precision parameter.
 
+The publisher commits the matching boundary/epoch identity, delay and emitted-edge sequence only after the final timer check passes and the GPIO rising write occurs. If that final read crosses 5000 µs, the edge is suppressed and the skipped counter increments. The current authoritative boundary is still published, but `SYNC_VALID` is clear and `sync_delay_us` is the invalid sentinel; `sync_sequence` remains the cumulative count of edges actually emitted. Thus an accepted clock boundary is not by itself evidence that its TIME_SYNC edge was emitted.
+
 ```text
  Electrical GPS PPS       ↑
  PPS interrupt timestamp    | capture
@@ -270,6 +272,6 @@ Paths below are relative to the inspected repository. This compact map makes cla
 
 The source checkout was clean at inspection. This document was created separately; existing source, documentation, and synced project material were preserved. The earlier conversation supplied the cost premise and historical design intent, while behavioral claims were checked against this source baseline and its tests. The hardware drawing is listed as a reference for the later hardware chapter; this pass verified pin assignments against source and the current protocol specification, not by a fresh inspection of the assembly.
 
-Two historical statements in `docs/pps-timebase.md` should not be read as current behavior: the display is no longer UTC-only, and normal output now includes paired-HH writes. They were left intact as requested. The final accommodation section of `docs/hh-zero-investigation.md` supersedes its earlier “no production change” investigation narrative.
+The historical HH investigations preserve their original findings and identify the earlier renderer/serializer descriptions as superseded. Current presentation and output behavior are documented in `docs/pps-timebase.md` and `docs/display-timezone.md`; current TIME_SYNC publication semantics are reflected here and in `docs/clock-network-protocol.md`.
 
 As the architecture develops, update the relevant functional chapter when a behavior or boundary changes, and record consequential choices while their rationale is still available. Accuracy claims should carry their measurement record; implementation claims should identify their source baseline. That keeps the document useful both for presenting the design and for deciding where informed criticism calls for a change.

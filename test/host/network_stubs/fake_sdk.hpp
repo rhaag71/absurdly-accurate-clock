@@ -29,6 +29,7 @@ struct Data {
 struct Hardware {uint32_t cr0=0,cr1=0,cpsr=0,imsc=0,ris=0,icr=0;Data dr;};
 extern Hardware hw;
 extern uint32_t now;
+extern uint32_t time_reads,advance_on_read,advance_by;
 extern bool levels[30];
 extern void (*callbacks[30])();
 extern void (*irq)();
@@ -54,6 +55,10 @@ inline void gpio_pull_up(unsigned p) {fake::levels[p]=true;}
 inline void gpio_pull_down(unsigned p) {fake::levels[p]=false;}
 inline unsigned digitalPinToInterrupt(unsigned p) {return p;}
 inline void attachInterrupt(unsigned p,void (*fn)(),unsigned) {fake::callbacks[p]=fn;}
-inline uint32_t time_us_32() {return fake::now;}
+inline uint32_t time_us_32() {
+    ++fake::time_reads;
+    if(fake::advance_on_read && fake::time_reads==fake::advance_on_read)fake::now+=fake::advance_by;
+    return fake::now;
+}
 inline uint32_t save_and_disable_interrupts() {return 0;}
 inline void restore_interrupts(uint32_t) {}

@@ -1,8 +1,14 @@
 # HH ones zero investigation
 
-The investigation below records the pre-accommodation baseline. The final section
-describes the subsequently implemented paired-HH accommodation; historical byte
-tables and no-production-change statements below refer to that earlier audit.
+> **Historical investigation with a current implementation addendum.** The byte
+> audit and “no accommodation” conclusion below describe the pre-accommodation
+> source and preserve what was known then. The current implementation uses the
+> paired-HH accommodation documented at the end and in
+> [`pps-timebase.md`](pps-timebase.md#pd-2200-investigation-and-blank-cell-strategy).
+> It also converts UTC to the selected display zone; the historical UTC-only
+> path is no longer current. Recheck current source and tests before using the
+> historical serializer, diagnostic capacity, or timezone statements as facts
+> about the present firmware.
 
 Follow-up to the earlier HH investigation and timezone UI implementation. Inputs
 are the reported physical 00->08 and 10->18 observations and supplied USB log
@@ -12,8 +18,9 @@ The earlier 28 example is not reclassified as a proven 20->28 event.
 
 ## Strongest finding
 
-No normal firmware transformation of address 08 plus payload 30 into 38 was
-found or reproduced. The new evidence points beyond a simple stale leading digit:
+At the investigated baseline, no normal firmware transformation of address 08
+plus payload 30 into 38 was found or reproduced. The new evidence points beyond
+a simple stale leading digit:
 when a physical dash has actually replaced the ones cell, merely dropping the
 subsequent zero leaves a dash, not an eight. A log of '-' acceptance does not prove
 that the physical cell was a dash, however. Both zeroes being accepted does not
@@ -168,12 +175,14 @@ can establish what this physical unit received or displayed.
    static writes at different cells, with a cold display power cycle and verified
    mode/model settings. A glyph/drive fault is different from ASCII corruption.
 
-There is NO proven fix yet. If A/B establishes that avoiding direct address 08
-reliably solves a receiver quirk, a narrowly documented PD-2200 pair write (one
-position at 07 plus both HH bytes, with paired cache/diagnostic accounting) is a
-candidate accommodation. Merely repeating the same failing command is not a
-proven solution and may hide evidence. Physical signal corruption needs a signal
-path fix; a glyph-drive fault may need display repair. No accommodation was added.
+**Superseded historical conclusion:** There was NO proven fix at the time. If
+A/B establishes that avoiding direct address 08 reliably solves a receiver
+quirk, a narrowly documented PD-2200 pair write (one position at 07 plus both HH
+bytes, with paired cache/diagnostic accounting) is a candidate accommodation.
+Merely repeating the same failing command is not a proven solution and may hide
+evidence. Physical signal corruption needs a signal path fix; a glyph-drive
+fault may need display repair. No accommodation was added during that
+investigation.
 
 TXHH proves the API accepted the payload and the earlier header, not that the
 wire/device did. Its 1B48 prefix is formatted by the logger, with address/payload
@@ -183,6 +192,7 @@ copied from the command buffer after payload success; it is not a wire sniffer.
 
 ## Implemented PD-2200 accommodation: contiguous HH
 
+The current accommodation was added after the historical investigation above.
 Physical observations include intended 00 rendered as 08 and 10 rendered as 18.
 The exact cause remains unproven. The VFD Output layer now deliberately treats
 HH as one field: either dirty HH cell selects `1B 48 07 tens ones`. This applies

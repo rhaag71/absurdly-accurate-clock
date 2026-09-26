@@ -31,7 +31,10 @@ private:
 class Publisher {
 public:
     bool needsSync(const clock_model::State&,const clock_model::Pulse&,uint32_t now_us);
-    void emitted(uint32_t delay_us);
+    // Commit synchronization identity only after the TIME_SYNC GPIO edge was emitted.
+    void emitted(uint32_t boundary,uint32_t delay_us,int64_t epoch);
+    // Count a candidate rejected by the final, immediately-before-edge deadline check.
+    void suppressed();
     bool update(const clock_model::State&,const clock_model::Pulse&);
     const Snapshot& snapshot() const {return current_;}
     uint32_t skipped() const {return skipped_;}

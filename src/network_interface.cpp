@@ -54,7 +54,7 @@ void csInterrupt() {
             if(overrun)++overruns;
         }
         active=false;
-        // Do not poll BSY: a stalled master or partial byte must never block.
+        // Do not poll BSY: a stalled controller or partial byte must never block.
         spi_get_hw(spi1)->cr1=SPI_SSPCR1_MS_BITS;
         return;
     }
@@ -98,13 +98,14 @@ void service(const clock_model::State& state,const clock_model::Pulse& pulse) {
         gpio_put(pins::time_sync,0);sync_high=false;
     }
     if(publisher.needsSync(state,pulse,now)) {
-        // Keep the measured timer-to-GPIO interval short and non-preemptible.
+        // Recheck the deadline immediately before emission. Only an actual edge
+        // commits this boundary's synchronization identity into the packet.
         const uint32_t saved=save_and_disable_interrupts();
         now=time_us_32();
         if(uint32_t(now-pulse.at_us)<=5000) {
             gpio_put(pins::time_sync,1);sync_high=true;sync_at=now;
-            publisher.emitted(now-pulse.at_us);
-        }
+            publisher.emitted(pulse.sequence,now-pulse.at_us,state.utc_seconds);
+        } else publisher.suppressed();
         restore_interrupts(saved);
     }
     if(publisher.update(state,pulse))mailbox.publish(encode(publisher.snapshot()));
@@ -113,7 +114,7 @@ bool diagnostic(char* buffer,size_t size,uint32_t now) {
     static bool initial=true;static uint32_t last=0;
     if(initial) {
         initial=false;last=now;
-        snprintf(buffer,size,"NET v1 SPI1 slave mode=1 bytes=40 max_hz=100000 sync=qualified-delayed\r\n");
+        snprintf(buffer,size,"NET v1 SPI1 peripheral mode=1 bytes=40 max_hz=100000 sync=qualified-delayed\r\n");
         return true;
     }
     if(uint32_t(now-last)<60000)return false;

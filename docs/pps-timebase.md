@@ -67,7 +67,14 @@ second insertion/deletion support is deferred.
 
 ## PPS-synchronized rolling decade indicator
 
-The clock row is UTC only. The digit after the decimal point is a visual
+The authoritative clock state is UTC. The display converts that state to the
+selected civil zone (UTC, Eastern, Central, Mountain, or Pacific) at render
+time; the displayed three-letter abbreviation follows standard/daylight status.
+This presentation conversion does not feed back into the timebase. See
+[`display-timezone.md`](display-timezone.md) for the button and contemporary
+U.S. DST rules.
+
+The digit after the decimal point is a visual
 progression indicator, **not part of UTC and not decimal tenths of UTC**. It is
 also independent of the tens-of-seconds digit. At PPS the clock arrives at
 HH:MM:SS.0 and holds .0 for 500 ms. It then winds through .1–.8 in 50 ms
@@ -104,8 +111,9 @@ invalidate synchronization independently of this effect.
 Animation is read-only presentation code. It cannot advance/correct UTC, mutate
 the timebase, or change RMC/PPS association. There is no animation work in the
 ISR, no new delay, and no extra RMC/PPS parsing. A small supplemental GGA parser
-updates satellite status only; it cannot label or advance UTC. The existing
-heartbeat and concise startup/GPS/synchronization USB diagnostics remain unchanged.
+updates satellite status only; it cannot label or advance UTC. The main loop also
+services the bounded USB heartbeat, GPS/synchronization diagnostics, and
+low-volume network-interface diagnostics.
 
 ## Final 20-column layout
 
@@ -121,7 +129,7 @@ represent **cleared, unwritten cells**, not transmitted padding bytes:
 | Row | Physical columns | Content |
 | --- | --- | --- |
 | 1 | 1–3 | Cleared, unused |
-| 1 | 4–6 | UTC |
+| 1 | 4–6 | Selected zone abbreviation (`UTC`, `EST`/`EDT`, `CST`/`CDT`, `MST`/`MDT`, or `PST`/`PDT`) |
 | 1 | 7 | Cleared gap |
 | 1 | 8–9 | HH |
 | 1 | 10 | Colon |
@@ -150,7 +158,7 @@ without a valid GGA. Satellite status is supplementary and never enters the
 RMC/PPS timebase. Satellites in view (GSV) are a different metric.
 Reference: [u-blox GGA definition](https://content.u-blox.com/sites/default/files/products/documents/u-blox7-V14_ReceiverDescriptionProtocolSpec_%28GPS.G7-SW-12001%29_Public.pdf).
 
-The 14-character `UTC HH:MM:SS.X` clock is centered with three cleared cells on
+The 14-character `<zone> HH:MM:SS.X` clock is centered with three cleared cells on
 each side. The plus sign is the good/present marker. The [PD-2200/PD-2100
 series manual](https://sabrepoint.onlinesavers.co.za/pub/poledisplayPD2200.pdf)
 documents Noritake mode, but its available text did not establish an upward-arrow
@@ -183,24 +191,28 @@ clear, positioned short fields write only meaningful characters. Even interior
 word separators are left cleared, never written as spaces. The literal period
 is normal ASCII `2E`, not a special attached-decimal command.
 
-Normal operation uses only four-byte direct-position character commands. Time
-and status availability changes overwrite occupied cells with digits, `-`, or
-`|`, so no erasure/space or full redraw is needed. `09 -> 10` changes both seconds
-digits; `59 -> 00` also changes the necessary minute/hour digits. A new layout
-must explicitly clear once and rebuild/reset the output cache. The full-row API
-is retained for tests/other uses but is never called by normal clock operation.
+Normal non-hour runtime updates use four-byte direct-position single-character
+commands. When either HH cell is dirty, the PD-2200-specific accommodation
+writes both hour characters contiguously from address 07 as a five-byte command
+(`ESC H 07 tens ones`). Thus a changed HH pair may include one unchanged glyph.
+Time and status availability changes overwrite occupied cells with digits, `-`,
+or `|`, so no erasure/space or full redraw is needed. A new layout must explicitly
+clear once and rebuild/reset the output cache. The full-row API is retained for
+tests/other uses but is never called by normal clock operation.
 
 `clock_display::Output` holds at most one direct-position command, not a queue
 of animation frames. It sends at most one byte per writable UART service call.
-Selection compares the latest desired frame with submitted characters; UTC
+Selection compares the latest desired frame with submitted characters; time
 characters have priority over the indicator, followed by status flags. If a
 header is partly sent when phase changes, its final glyph is refreshed from the
 latest desired frame. No historical intermediate phases are retained. Bytes
 already accepted by the UART cannot be recalled; visible updates have normal
-9600-baud wire latency (about 4.2 ms per character command). If phase returns to the already submitted glyph after a position header has
-been sent, the redundant data byte is omitted: `ESC H position` is a complete
-command by itself and the next update positions explicitly again. Thus even
-this case sends no unchanged glyph.
+9600-baud wire latency (about 4.2 ms per character command). If phase returns to
+the already submitted glyph after a position header has been sent, the redundant
+data byte is omitted for single-character commands: `ESC H position` is a
+complete command by itself and the next update positions explicitly again. The
+paired-HH command instead keeps both field bytes contiguous once its payload
+begins.
 
 `Frame` still accounts for all 20 cells and retains ASCII-space placeholders and
 a terminator at byte 20, but the operating output path never sends these spaces
