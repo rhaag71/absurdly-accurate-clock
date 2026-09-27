@@ -158,6 +158,15 @@ void setup() {
 }
 
 void loop() {
+    // TEMPORARY WATCHDOG BENCH TEST: hang after 10 seconds of normal loop operation.
+    static const uint32_t bench_started_ms = millis();
+    if (uint32_t(millis() - bench_started_ms) >= 10000) {
+        const char message[] = "WATCHDOG BENCH TEST: intentionally hanging\r\n";
+        if (Serial && Serial.availableForWrite() >= int(sizeof(message) - 1))
+            Serial.write(reinterpret_cast<const uint8_t*>(message), sizeof(message) - 1);
+        for (;;) { asm volatile("nop"); } // No feed: let the hardware watchdog expire.
+    }
+    // END TEMPORARY WATCHDOG BENCH TEST.
     uint32_t now_us;
     auto pulse = snapshot(now_us);
     // A stalled main loop cannot safely timestamp already-buffered UART bytes.
@@ -204,6 +213,13 @@ void loop() {
         --usb_used;
     }
     const uint32_t now = millis();
+    // TEMPORARY WATCHDOG BENCH TEST: repeat reset cause after USB re-enumeration.
+    static uint32_t bench_reset_report_ms = 0;
+    if (watchdog_boot && uint32_t(now - bench_reset_report_ms) >= 2000) {
+        bench_reset_report_ms = now;
+        diagnostic("RESET=WATCHDOG\r\n");
+    }
+    // END TEMPORARY WATCHDOG BENCH TEST reset diagnostic.
     const bool zone_changed = zone_button.poll(digitalRead(pins::ui_button) == LOW, now);
     if (appliance::heartbeat_due(now, last_heartbeat_ms, watchdog_boot)) {
         last_heartbeat_ms = now;
