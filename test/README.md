@@ -11,7 +11,9 @@ installation is required. Binaries live in temporary storage.
 
 - `watchdog_test.cpp` checks normal/watchdog heartbeat intervals, exact toggle
   thresholds, repeated session cadence and unsigned millis wrap using production
-  policy helpers. Reset-cause hardware, watchdog expiry and actual acquisition
+  policy helpers. It also checks every-fifth-message reset reporting over 10,000
+  messages, normal-boot suppression and fresh per-boot counters.
+  Reset-cause hardware, watchdog expiry and actual acquisition
   after a reset require the physical bench procedure in the project README.
 
 - `timebase_test.cpp` exercises the production GPRMC parser, UTC/PPS association,

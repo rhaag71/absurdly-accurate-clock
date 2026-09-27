@@ -18,5 +18,16 @@ int main() {
             last += interval;
         }
     }
-    std::puts("Watchdog heartbeat policy tests passed");
+    for (bool watchdog_boot : {false, true}) {
+        appliance::WatchdogDiagnostic reports;
+        for (unsigned line = 1; line <= 10000; ++line)
+            assert(reports.next(watchdog_boot) == (watchdog_boot && line % 5 == 0));
+    }
+    // A new boot starts a fresh count and does not retain the previous cause.
+    appliance::WatchdogDiagnostic normal_boot;
+    for (unsigned line = 0; line < 10; ++line) assert(!normal_boot.next(false));
+    appliance::WatchdogDiagnostic watchdog_boot;
+    for (unsigned line = 0; line < 4; ++line) assert(!watchdog_boot.next(true));
+    assert(watchdog_boot.next(true));
+    std::puts("Watchdog heartbeat/diagnostic policy tests passed");
 }

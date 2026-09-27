@@ -85,7 +85,11 @@ must be acquired again by the existing rules. Nothing preserves time quality
 across reset. The SDK's RP2350-aware `watchdog_caused_reboot()` is sampled before
 enabling the watchdog. A watchdog boot queues `RESET: watchdog` on USB serial
 alongside existing diagnostics (subject to the existing bounded queue/host
-availability). The heartbeat toggles every 250 ms for that entire session instead
+availability). It also queues `RESET=WATCHDOG` after every fifth ordinary diagnostic
+message for the remainder of that boot, so the cause remains observable after USB
+reconnects. The marker does not count itself; cadence follows diagnostic activity
+(potentially several minutes when quiet), with the same queue/drop policy. Normal
+boots emit no periodic reset marker. The heartbeat toggles every 250 ms for that entire session instead
 of the normal 500 ms: 2 Hz versus 1 Hz full blink cycles. Reacquisition does not
 clear the faster cadence; a normal power cycle/reset restores normal cadence.
 This is a liveness/reset diagnostic, independent of all time and network quality.

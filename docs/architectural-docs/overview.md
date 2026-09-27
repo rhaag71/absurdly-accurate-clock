@@ -99,7 +99,12 @@ while degraded input quality by itself cannot.
 
 Watchdog recovery uses normal startup and reacquisition, retaining no UTC/PPS or
 TIME_SYNC validity. The RP2350-aware SDK reset-cause check runs before arming and
-queues `RESET: watchdog` on existing USB diagnostics. For that boot only, heartbeat
+queues `RESET: watchdog` on existing USB diagnostics. Throughout that boot,
+`RESET=WATCHDOG` is also queued after every fifth ordinary diagnostic message,
+allowing observation after USB reconnects. This uses the same bounded queue and
+drop policy, counts no supplemental markers, and introduces no timer; quiet
+operation can space reports several minutes apart. Normal boots omit the marker.
+For that boot only, heartbeat
 toggles are 250 ms instead of 500 ms, persisting through reacquisition until a
 normal reset/power cycle. This diagnostic is separate from time/network quality.
 See the README's unattended recovery section for debugger bench verification.

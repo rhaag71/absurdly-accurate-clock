@@ -47,7 +47,7 @@ clock_model::Pulse snapshot(uint32_t& now_us) {
 char usb_queue[1024];
 uint32_t diagnostic_drops = 0;
 size_t usb_head = 0, usb_tail = 0, usb_used = 0;
-void diagnostic(const char* message) {
+void queueDiagnostic(const char* message) {
     const size_t length = std::strlen(message);
     if (length > sizeof(usb_queue) - usb_used) { ++diagnostic_drops; return; }
     for (size_t i = 0; i < length; ++i) {
@@ -55,6 +55,11 @@ void diagnostic(const char* message) {
         usb_head = (usb_head + 1) % sizeof(usb_queue);
     }
     usb_used += length;
+}
+void diagnostic(const char* message) {
+    queueDiagnostic(message);
+    static appliance::WatchdogDiagnostic reset_report;
+    if (reset_report.next(watchdog_boot)) queueDiagnostic("RESET=WATCHDOG\r\n");
 }
 void reportTransitions() {
     static bool gps = false, locked = false;
