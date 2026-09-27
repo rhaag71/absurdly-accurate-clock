@@ -9,6 +9,11 @@ sh test/host/run.sh
 Uses a host C++11 compiler with warnings treated as errors. No PlatformIO/Arduino
 installation is required. Binaries live in temporary storage.
 
+- `watchdog_test.cpp` checks normal/watchdog heartbeat intervals, exact toggle
+  thresholds, repeated session cadence and unsigned millis wrap using production
+  policy helpers. Reset-cause hardware, watchdog expiry and actual acquisition
+  after a reset require the physical bench procedure in the project README.
+
 - `timebase_test.cpp` exercises the production GPRMC parser, UTC/PPS association,
   acquisition/correction, pulse loss/cadence, GPS loss, recovery, timestamp and
   sequence wrap, and second/minute/hour/day/month/year/leap-day rollovers.

@@ -1,6 +1,8 @@
 #include <Arduino.h>
 #include <cstring>
 #include <cstdio>
+#include <hardware/watchdog.h>
+#include "watchdog_policy.hpp"
 #include "clock_state.hpp"
 #include "clock_display.hpp"
 #include "clock_vfd.hpp"
@@ -22,6 +24,7 @@ volatile uint32_t pps_at_us = 0;
 volatile bool pps_seen = false;
 uint32_t last_heartbeat_ms = 0;
 bool heartbeat_on = true;
+bool watchdog_boot = false; // Latched once in setup; never cleared on acquisition.
 
 void onPpsRise() {
     pps_at_us = micros();
@@ -127,10 +130,16 @@ clock_model::Reception reception;
 }
 
 void setup() {
+    // Read the RP2350 reset cause before arming this boot's watchdog.
+    watchdog_boot = watchdog_caused_reboot();
+    // Also cover startup stalls. Normal VFD delays total 600 ms plus UART drain.
+    // Keep running under debugger halt so a halted main loop can be bench-tested.
+    watchdog_enable(appliance::watchdog_timeout_ms, false);
     pinMode(LED_BUILTIN, OUTPUT);
     digitalWrite(LED_BUILTIN, HIGH); // Early indication that setup() was reached.
     last_heartbeat_ms = millis();
     Serial.begin(115200); // USB diagnostics; never wait for a connected host.
+    if (watchdog_boot) diagnostic("RESET: watchdog\r\n");
     // Retain GPS bytes arriving during the existing VFD startup delays.
     Serial1.setFIFOSize(1024);
     hardware::begin(gps_baud, vfd_baud);
@@ -196,7 +205,7 @@ void loop() {
     }
     const uint32_t now = millis();
     const bool zone_changed = zone_button.poll(digitalRead(pins::ui_button) == LOW, now);
-    if (now - last_heartbeat_ms >= 500) {
+    if (appliance::heartbeat_due(now, last_heartbeat_ms, watchdog_boot)) {
         last_heartbeat_ms = now;
         heartbeat_on = !heartbeat_on;
         digitalWrite(LED_BUILTIN, heartbeat_on ? HIGH : LOW);
@@ -215,4 +224,7 @@ void loop() {
     clock_display::AcceptedCharacter accepted;
     vfd_output.service(desired, Serial2.availableForWrite() > 0, &accepted);
     reportAccepted(accepted, desired, pulse, now);
+    // Sole recurring feed: all main-loop services completed. Degraded inputs,
+    // absent peers and display backpressure are valid states, not reset reasons.
+    watchdog_update();
 }

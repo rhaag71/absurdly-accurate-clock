@@ -90,6 +90,20 @@ Normal service bounds GPS work to 64 received bytes per loop and USB diagnostic 
 
 Bounded work reduces interference but is not a measured worst-case execution-time proof. A gap of more than 20 ms between GPS-service passes is treated as loss of trustworthy reception timing: the parsers reset, lock is cleared, and buffered bytes are drained. Display or interrupt load therefore cannot change the epoch through an intended data path, but excessive load can cause availability loss. A future latency study must include the complete running system.
 
+The RP2350 hardware watchdog provides unattended liveness recovery with a 4,000 ms
+timeout. It is armed early in setup and fed only at the end of a completed main-loop
+pass, after timing, diagnostics, network and VFD work; interrupt/timer paths never
+feed it. Ordinary GPS/PPS loss, invalid UTC, display backpressure/faults and absent
+ESP32 operation do not gate feeding. A wedged service can therefore cause recovery,
+while degraded input quality by itself cannot.
+
+Watchdog recovery uses normal startup and reacquisition, retaining no UTC/PPS or
+TIME_SYNC validity. The RP2350-aware SDK reset-cause check runs before arming and
+queues `RESET: watchdog` on existing USB diagnostics. For that boot only, heartbeat
+toggles are 250 ms instead of 500 ms, persisting through reacquisition until a
+normal reset/power cycle. This diagnostic is separate from time/network quality.
+See the README's unattended recovery section for debugger bench verification.
+
 ### 2.3 Architectural invariants and their scope
 
 | Invariant in the current software | Practical meaning |

@@ -4,6 +4,9 @@ cd "$(dirname "$0")/../.."
 test_dir=$(mktemp -d /tmp/clock-host-tests.XXXXXX)
 trap 'rm -rf "$test_dir"' EXIT HUP INT TERM
 c++ -std=c++11 -Wall -Wextra -Werror -I include \
+    test/host/watchdog_test.cpp -o "$test_dir/watchdog"
+"$test_dir/watchdog"
+c++ -std=c++11 -Wall -Wextra -Werror -I include \
     src/nmea_rmc.cpp src/nmea_gga.cpp src/clock_state.cpp src/display_time.cpp src/clock_display.cpp \
     test/host/timebase_test.cpp -o "$test_dir/timebase"
 "$test_dir/timebase"

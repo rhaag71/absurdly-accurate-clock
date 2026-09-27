@@ -71,6 +71,41 @@ runs standalone without the ESP32. [Protocol v1](docs/clock-network-protocol.md)
 specifies the wiring, packet and phase-delay semantics; nothing received from the
 ESP32 can change Pico time.
 
+## Unattended recovery
+
+The RP2350 hardware watchdog recovers a wedged firmware main loop after **4,000 ms**
+without a feed. It is enabled at the start of setup (covering startup stalls too)
+and fed only after all recurring main-loop services complete, never by an ISR or
+timer. This leaves ample margin over the 600 ms of VFD startup delays and UART
+drain; normal loop work is bounded. GPS/PPS loss, invalid UTC, display faults or
+backpressure, and an absent ESP32 do not intentionally cause resets.
+
+Recovery follows normal startup: GPS/UTC validity, PPS lock and TIME_SYNC validity
+must be acquired again by the existing rules. Nothing preserves time quality
+across reset. The SDK's RP2350-aware `watchdog_caused_reboot()` is sampled before
+enabling the watchdog. A watchdog boot queues `RESET: watchdog` on USB serial
+alongside existing diagnostics (subject to the existing bounded queue/host
+availability). The heartbeat toggles every 250 ms for that entire session instead
+of the normal 500 ms: 2 Hz versus 1 Hz full blink cycles. Reacquisition does not
+clear the faster cadence; a normal power cycle/reset restores normal cadence.
+This is a liveness/reset diagnostic, independent of all time and network quality.
+
+### Physical watchdog bench test
+
+Use an SWD debugger with the production firmware; no firmware test hook is needed.
+After normal startup, halt the application core at `loop()` and leave it halted
+for more than four seconds. Watchdog debug pause is disabled. Configure the
+debugger not to catch/hold reset or automatically re-halt the restarted target,
+then detach without issuing another reset so startup can run. Confirm a hardware
+reset about four seconds after the last feed, reconnect USB serial promptly to
+observe `RESET: watchdog`, and check the persistent 250 ms LED toggle interval.
+With GPS/PPS withheld, confirm invalid time/no qualified TIME_SYNC; restore them
+and confirm normal reacquisition while the faster heartbeat persists. Finally
+power-cycle and check the normal 500 ms interval. Separately run with missing
+GPS/PPS, disconnected display, and absent ESP32 for longer than four seconds to
+check that degraded operation alone does not reset. Host tests cannot establish
+the physical reset behavior or exact timeout; record those on the bench.
+
 ## Verified VFD wiring
 
 Bench testing verified Pico 2 GP4 (physical pin 6) UART TX at 9600 baud on an
