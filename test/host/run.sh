@@ -36,3 +36,4 @@ c++ -std=c++11 -Wall -Wextra -Werror -I test/host/network_stubs -I include \
     src/network_protocol.cpp src/network_interface.cpp test/host/network_transport_test.cpp \
     -o "$test_dir/network_transport"
 "$test_dir/network_transport"
+"$test_dir/network_transport" boot-low

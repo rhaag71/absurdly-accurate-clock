@@ -222,7 +222,7 @@ void loop() {
     timebase.satelliteStatus().poll(now_us);
     reportTransitions();
     clock_network::service(timebase.state(), pulse);
-    char net_message[224];
+    char net_message[256];
     if (clock_network::diagnostic(net_message, sizeof(net_message), now)) diagnostic(net_message);
     const auto desired = clock_display::render(timebase.state(), pulse, now_us, zone_button.zone());
     reportDisplay(desired, pulse, now, zone_changed);

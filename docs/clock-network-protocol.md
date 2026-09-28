@@ -33,15 +33,21 @@ Mode 1 is intentional: PL022 SPH=1 permits continuous frames under one CS.
 Controller procedure:
 1. Allow 1 second after Pico startup before the first request. Keep CS high at
    least 1 ms between transactions; at most 10 transactions/second.
-2. Assert CS low, wait **at least 100 us** for the bounded CS interrupt to reset,
+2. Assert CS low, wait **at least 100 us** for the bounded CS interrupt to
    select an immutable snapshot, and preload the FIFO. Do not clock earlier.
 3. Clock exactly **40 bytes** continuously, sending zeroes on MOSI.
 4. Hold CS low at least **10 us after the last trailing SCK edge**, then deassert it. Validate signature/version/length,
    reserved fields and CRC before using any data. Reject incomplete reads.
 
 CS falling latches the latest fully published packet. It cannot change during
-that transaction. Short/extra/aborted transactions never affect the clock. Each
-new CS resets SPI1, discarding old FIFO/partial-word state. Extra complete bytes
+that transaction. Short/extra/aborted transactions never affect the clock. After
+CS rises, SPI1 is reset to discard old FIFO/partial-word state and re-armed
+while deselected. It is already enabled in slave mode before the next selection.
+CS falling does not reset or reconfigure it. CS/SCK output-enable overrides keep
+these controller-owned signals input-only even during reset. A GP9-only SDK raw
+handler acknowledges explicit edge identities; duplicate falling notifications
+cannot destroy an active transfer, and Arduino PPS dispatch remains independent.
+See the permanent [reset feedback investigation and fix](pico-spi-investigation.md). Extra complete bytes
 are counted as malformed; sub-byte tails cannot always be counted by this SPI
 peripheral. Stop after 40 bytes: surplus output is unspecified, not another packet.
 After 48 received bytes transport interrupts are disabled until CS rises, bounding
@@ -130,7 +136,7 @@ Main-loop code reads State/Pulse only after Timebase::poll of that same capture.
 It encodes into the inactive packet buffer then publishes its index with release
 ordering. The same-core CS ISR acquires and copies a complete packet into its
 transaction buffer; subsequent publications cannot alter it. Interrupt work is
-bounded (40-byte copy/reset/preload, or at most eight RX/TX FIFO accesses per
+bounded (40-byte copy/preload on selection, reset on deselection, or at most eight RX/TX FIFO accesses per
 SPI interrupt). IRQ handlers never parse NMEA, convert UTC, format USB text or
 modify the timebase. Arduino-Pico's SPISlave streaming callbacks lack the needed
 CS framing, so transport uses the bundled SDK SPI/GPIO/IRQ/reset APIs directly.

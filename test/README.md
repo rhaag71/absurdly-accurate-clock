@@ -84,5 +84,9 @@ space-to-zero behavior.
 - `network_transport_test.cpp` compiles the production native SPI1 transport with
   a register/FIFO model to check immutable CS snapshots at every byte split,
   short/extra/stalled transactions, subsequent realignment, TIME_SYNC qualification,
-  ignored MOSI, and summary counters. Hardware electrical timing is not modeled.
+  ignored MOSI, and summary counters. Lifecycle regression coverage includes 700
+  duplicate low notifications without FIFO destruction, partial-byte abort cleanup,
+  explicit/coalesced GPIO events, PPS dispatch coexistence, input-only reset
+  overrides, and a separate boot-with-CS-low process. Hardware electrical timing
+  and interrupt latency are not modeled.
 - Portable ESP32-side reference vectors are in `host/network-v1-vectors.json`.

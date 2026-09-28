@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <hardware/spi.h>
 #include <hardware/irq.h>
+#include <hardware/gpio.h>
 #include <hardware/resets.h>
 #include <hardware/sync.h>
 #include <hardware/timer.h>
@@ -15,11 +16,13 @@ Mailbox mailbox;
 Publisher publisher;
 Packet transaction;
 volatile uint32_t transactions=0,short_reads=0,extra_reads=0,overruns=0;
+volatile uint32_t full_reads=0,cs_faults=0;
 unsigned sent=0,received=0;
-bool active=false,overrun=false;
+bool active=false,ready=false,overrun=false;
 bool sync_high=false;
 uint32_t sync_at=0;
 uint32_t cr0=0,cpsr=0;
+constexpr uint32_t cs_edges=GPIO_IRQ_EDGE_FALL|GPIO_IRQ_EDGE_RISE;
 constexpr uint32_t irq_mask=SPI_SSPIMSC_TXIM_BITS|SPI_SSPIMSC_RXIM_BITS|
                             SPI_SSPIMSC_RTIM_BITS|SPI_SSPIMSC_RORIM_BITS;
 // Eight FIFO entries per pass; never wait for external clocks or a peer.
@@ -38,6 +41,20 @@ void fill() {
         if(sent<packet_size)++sent;
     }
 }
+// Only after deselection (or initial idle). Reset removes prefetched TX bytes
+// and aborted partial words. GPIO OE overrides keep CS/SCK inputs even while
+// reset temporarily restores master mode. Never reset in the falling-edge path.
+void prepare() {
+    ready=false;
+    if(!gpio_get(pins::esp_spi_cs))return;
+    spi_get_hw(spi1)->imsc=0;
+    reset_block(RESETS_RESET_SPI1_BITS);
+    unreset_block_wait(RESETS_RESET_SPI1_BITS);
+    spi_get_hw(spi1)->cr0=cr0;spi_get_hw(spi1)->cpsr=cpsr;
+    spi_get_hw(spi1)->cr1=SPI_SSPCR1_MS_BITS|SPI_SSPCR1_SSE_BITS;
+    ready=true;
+    // Empty TX, IRQs masked: no stale packet and no idle TX interrupt storm.
+}
 void spiInterrupt() {
     if(!active) {spi_get_hw(spi1)->imsc=0;return;}
     drain();
@@ -45,29 +62,43 @@ void spiInterrupt() {
     fill();
 }
 void csInterrupt() {
-    if(gpio_get(pins::esp_spi_cs)) {
-        spi_get_hw(spi1)->imsc=0;
+    const uint32_t events=gpio_get_irq_event_mask(pins::esp_spi_cs)&cs_edges;
+    if(!events)return; // Raw bank handler may also run for PPS/other GPIOs.
+    gpio_acknowledge_irq(pins::esp_spi_cs,events);
+    const bool high=gpio_get(pins::esp_spi_cs);
+    if(events&GPIO_IRQ_EDGE_RISE) {
+        if(events&GPIO_IRQ_EDGE_FALL)++cs_faults; // Edges coalesced; boundary ambiguous.
+        if(!high) {
+            // A new selection already started before its preceding rise was
+            // handled. Reject it; wait for high to recover, never reset under CS.
+            if(!(events&GPIO_IRQ_EDGE_FALL))++cs_faults;
+            spi_get_hw(spi1)->imsc=0;
+            spi_get_hw(spi1)->cr1=SPI_SSPCR1_MS_BITS;
+            active=ready=false;
+            return;
+        }
         if(active) {
+            spi_get_hw(spi1)->imsc=0;
             drain();++transactions;
             if(received<packet_size)++short_reads;
+            if(received==packet_size)++full_reads;
             if(received>packet_size)++extra_reads;
             if(overrun)++overruns;
+            active=false;
+        } else if(ready) {
+            ++cs_faults; // Duplicate rise: already clean, do not prepare again.
+            return;
         }
-        active=false;
-        // Do not poll BSY: a stalled controller or partial byte must never block.
-        spi_get_hw(spi1)->cr1=SPI_SSPCR1_MS_BITS;
+        prepare();
         return;
     }
-    // Hard peripheral reset clears both FIFOs AND an aborted partial word.
-    // CS-to-first-clock setup in the protocol covers this fixed local work.
-    spi_get_hw(spi1)->imsc=0;
-    reset_block(RESETS_RESET_SPI1_BITS);
-    unreset_block_wait(RESETS_RESET_SPI1_BITS);
-    spi_get_hw(spi1)->cr0=cr0;spi_get_hw(spi1)->cpsr=cpsr;
-    spi_get_hw(spi1)->cr1=SPI_SSPCR1_MS_BITS;
-    transaction=mailbox.latch();sent=received=0;overrun=false;active=true;
-    fill();
-    spi_get_hw(spi1)->cr1=SPI_SSPCR1_MS_BITS|SPI_SSPCR1_SSE_BITS;
+    if(high || active || !ready) {
+        ++cs_faults; // Duplicate/stale fall cannot destroy an active frame.
+        return;
+    }
+    transaction=mailbox.latch();sent=received=0;overrun=false;
+    ready=false;active=true;
+    fill(); // Existing >=100 us CS setup contract covers latch/preload only.
     spi_get_hw(spi1)->imsc=irq_mask;
 }
 }
@@ -84,13 +115,20 @@ void begin() {
     gpio_set_function(pins::esp_spi_rx,GPIO_FUNC_SPI);
     gpio_set_function(pins::esp_spi_tx,GPIO_FUNC_SPI);
     gpio_set_function(pins::esp_spi_sck,GPIO_FUNC_SPI);
+    gpio_set_oeover(pins::esp_spi_sck,GPIO_OVERRIDE_LOW);
     gpio_set_function(pins::esp_spi_cs,GPIO_FUNC_SPI);
+    gpio_set_oeover(pins::esp_spi_cs,GPIO_OVERRIDE_LOW);
     gpio_pull_up(pins::esp_spi_cs);
     gpio_pull_down(pins::esp_spi_rx);gpio_pull_down(pins::esp_spi_sck);
     irq_set_exclusive_handler(SPI1_IRQ,spiInterrupt);
     irq_set_enabled(SPI1_IRQ,true);
-    attachInterrupt(digitalPinToInterrupt(pins::esp_spi_cs),csInterrupt,CHANGE);
-    // If CS was already low at boot, wait for high then a new assertion.
+    // Claim only GP9; preserve the SDK/Arduino default callback for PPS on GP2.
+    const uint32_t saved=save_and_disable_interrupts();
+    gpio_add_raw_irq_handler_masked(1u<<pins::esp_spi_cs,csInterrupt);
+    gpio_set_irq_enabled(pins::esp_spi_cs,cs_edges,true);
+    irq_set_enabled(IO_IRQ_BANK0,true);
+    prepare(); // If CS is low at boot, leave disabled until its first rise.
+    restore_interrupts(saved);
 }
 void service(const clock_model::State& state,const clock_model::Pulse& pulse) {
     uint32_t now=time_us_32();
@@ -121,13 +159,14 @@ bool diagnostic(char* buffer,size_t size,uint32_t now) {
     last=now;
     const uint32_t saved=save_and_disable_interrupts();
     const uint32_t tx=transactions,shorts=short_reads,extras=extra_reads,over=overruns;
+    const uint32_t full=full_reads,faults=cs_faults;
     restore_interrupts(saved);
     const auto& s=publisher.snapshot();
-    snprintf(buffer,size,"NET seq=%lu epoch=%lld flags=%02X tx=%lu short=%lu extra=%lu over=%lu sync=%lu skipped=%lu\r\n",
+    snprintf(buffer,size,"NET seq=%lu epoch=%lld flags=%02X tx=%lu short=%lu extra=%lu over=%lu full=%lu csfault=%lu sync=%lu skipped=%lu\r\n",
         static_cast<unsigned long>(s.sequence),static_cast<long long>(s.epoch),unsigned(s.flags),
         static_cast<unsigned long>(tx),static_cast<unsigned long>(shorts),static_cast<unsigned long>(extras),
-        static_cast<unsigned long>(over),static_cast<unsigned long>(s.sync_sequence),
-        static_cast<unsigned long>(publisher.skipped()));
+        static_cast<unsigned long>(over),static_cast<unsigned long>(full),static_cast<unsigned long>(faults),
+        static_cast<unsigned long>(s.sync_sequence),static_cast<unsigned long>(publisher.skipped()));
     return true;
 }
 }
