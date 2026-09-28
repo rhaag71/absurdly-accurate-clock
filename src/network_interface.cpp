@@ -51,9 +51,10 @@ void prepare() {
     reset_block(RESETS_RESET_SPI1_BITS);
     unreset_block_wait(RESETS_RESET_SPI1_BITS);
     spi_get_hw(spi1)->cr0=cr0;spi_get_hw(spi1)->cpsr=cpsr;
-    spi_get_hw(spi1)->cr1=SPI_SSPCR1_MS_BITS|SPI_SSPCR1_SSE_BITS;
+    spi_get_hw(spi1)->cr1=SPI_SSPCR1_MS_BITS;
     ready=true;
-    // Empty TX, IRQs masked: no stale packet and no idle TX interrupt storm.
+    // Keep SSE off with an empty FIFO so no empty shifter state can precede
+    // byte zero. The selected transaction primes TX before enabling the SSP.
 }
 void spiInterrupt() {
     if(!active) {spi_get_hw(spi1)->imsc=0;return;}
@@ -98,7 +99,8 @@ void csInterrupt() {
     }
     transaction=mailbox.latch();sent=received=0;overrun=false;
     ready=false;active=true;
-    fill(); // Existing >=100 us CS setup contract covers latch/preload only.
+    fill(); // Prime TX while disabled, as required by PL022 startup.
+    spi_get_hw(spi1)->cr1=SPI_SSPCR1_MS_BITS|SPI_SSPCR1_SSE_BITS;
     spi_get_hw(spi1)->imsc=irq_mask;
 }
 }

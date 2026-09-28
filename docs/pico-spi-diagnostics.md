@@ -1,6 +1,6 @@
 > Historical diagnostic-build field reference. These temporary fields and the
 > observer were removed by the production lifecycle correction. Current NET
-> fields and hardware acceptance status are in [the investigation](pico-spi-investigation.md).
+> fields and both verified hardware results are in [the investigation](pico-spi-investigation.md).
 
 # Pico SPI diagnostic build
 

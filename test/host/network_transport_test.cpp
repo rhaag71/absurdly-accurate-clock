@@ -10,7 +10,7 @@ uint32_t reset_count=0,reset_selected=0,unsafe_resets=0;
 unsigned functions[30]={},oeover[30]={};
 uint32_t pending[30]={},enabled[30]={},raw_mask=0;
 void (*raw_handler)()=nullptr;
-Hardware hw;uint32_t now=0,time_reads=0,advance_on_read=0,advance_by=0;bool levels[30]={};
+Hardware hw;bool expect_prime=false;unsigned prime_writes=0;uint32_t now=0,time_reads=0,advance_on_read=0,advance_by=0;bool levels[30]={};
 void (*callbacks[30])()={};void (*irq)()=nullptr;unsigned rises=0;
 }
 // SDK raw handlers see bank interrupts; default dispatch excludes claimed pins.
@@ -21,7 +21,16 @@ void dispatch(unsigned pin,uint32_t events) {
         fake::pending[p]=0;if(fake::callbacks[p])fake::callbacks[p]();
     }
 }
-void select(bool low) {fake::levels[9]=!low;dispatch(9,low ? 4:8);}
+void select(bool low) {
+    fake::levels[9]=!low;
+    if(low) {fake::expect_prime=true;fake::prime_writes=8;}
+    dispatch(9,low ? 4:8);
+    if(low) {
+        assert(fake::prime_writes==0);
+        assert(fake::hw.cr1&SPI_SSPCR1_SSE_BITS);
+        fake::expect_prime=false;
+    }
+}
 uint8_t clockByte(uint8_t mosi=0xa5) {
     assert(!fake::levels[9] && fake::hw.partial_bits==0);
     assert(fake::hw.cr1 & SPI_SSPCR1_SSE_BITS);
@@ -44,12 +53,12 @@ int main(int argc,char**) {
     assert(fake::oeover[9]==GPIO_OVERRIDE_LOW && fake::oeover[10]==GPIO_OVERRIDE_LOW);
     if(argc>1) {
         assert(!(fake::hw.cr1&SPI_SSPCR1_SSE_BITS) && fake::hw.dr.tx.empty());
-        select(true);assert(fake::reset_count==0);
+        dispatch(9,GPIO_IRQ_EDGE_FALL);assert(fake::reset_count==0 && fake::hw.dr.tx.empty());
         select(false);Snapshot first;assert(decode(read(),first));
         assert(fake::reset_selected==0 && fake::unsafe_resets==0);
         puts("SPI boot with CS held low recovers on deselection");return 0;
     }
-    assert(fake::hw.cr1&SPI_SSPCR1_SSE_BITS);
+    assert(!(fake::hw.cr1&SPI_SSPCR1_SSE_BITS));
     assert(fake::hw.dr.tx.empty() && fake::hw.imsc==0);
     assert(fake::hw.cr0==0x87);assert(!fake::levels[12]);
     assert(!fake::callbacks[13]);

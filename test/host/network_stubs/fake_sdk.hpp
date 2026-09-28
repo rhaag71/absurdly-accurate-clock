@@ -24,11 +24,18 @@ using uint=unsigned;
 namespace fake {
 struct Data {
     std::deque<uint8_t> tx,rx;
-    void operator=(uint32_t b) {assert(tx.size()<8);tx.push_back(b);}
+    void operator=(uint32_t b);
     operator uint32_t() {assert(!rx.empty());auto b=rx.front();rx.pop_front();return b;}
 };
 struct Hardware {uint32_t cr0=0,cr1=0,cpsr=0,imsc=0,ris=0,icr=0;unsigned partial_bits=0;Data dr;};
 extern Hardware hw;
+extern bool expect_prime;
+extern unsigned prime_writes;
+inline void Data::operator=(uint32_t b) {
+    assert(tx.size()<8);
+    if(expect_prime) {assert(!(hw.cr1&SPI_SSPCR1_SSE_BITS));--prime_writes;}
+    tx.push_back(b);
+}
 extern bool irq_enabled;
 extern uint32_t reset_count,reset_selected,unsafe_resets;
 extern unsigned functions[30],oeover[30];

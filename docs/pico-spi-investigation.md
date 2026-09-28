@@ -1,7 +1,8 @@
 # Pico SPI1 investigation: hardware sample and installed implementation
 
-Current status: production lifecycle correction implemented; post-fix hardware
-acceptance pending. See [final evidence and fix](#production-correction--2026-09-27-hardware-acceptance-pending).
+Current status: both the reset-storm lifecycle correction and separate TX
+first-byte alignment correction are hardware-verified. See [reset-storm evidence](#production-correction--reset-storm-hardware-verified-2026-09-27)
+and [final hardware acceptance](#final-hardware-acceptance--both-spi-failures-resolved).
 Earlier sections below are the chronological diagnostic-only investigation,
 not statements of current fix status. See [historical field definitions](pico-spi-diagnostics.md).
 
@@ -364,23 +365,20 @@ Do not call a retained INTR bit an acknowledgement bug without that qualificatio
 
 ### Permanent record and fix status
 
-No functional fix is authorized or implemented. The repeated-reset mechanism is
-now measured; the event-generation mechanism remains conditional. The next step
-is one firmware-only diagnostic run with unchanged ESP behavior, collecting two
-minute summaries. The earlier scope proposal is superseded for this step.
+Historical status when this diagnostic build was prepared: a functional fix was
+not yet authorized, and the next step was a firmware-only diagnostic run. That
+run's measurements and the subsequent authorized fix are recorded in the later
+sections. No scope measurement was made.
 
-If reset-induced CS retriggering is confirmed, the smallest fix direction is to
-prevent the slave reset from temporarily driving its externally driven CS/SCK
-pads (for example a carefully reviewed input-only output-enable policy for those
-slave inputs), or prepare reset while safely deselected. Neither is implemented;
-a reselect guard alone would conceal the repeated event without establishing the
-pin behavior is correct. No final fix is selected without the pending evidence.
+Historical decision at this stage: additional reset-window GPIO evidence had not
+yet been collected, so no fix had been selected. The later investigation below
+confirmed a reset-correlated event storm and implemented deselected recovery plus
+CS/SCK output-enable suppression. The final hardware acceptance section records
+its outcome and preserves the unmeasured analogue-transient caveat.
 
-Keep this document permanently. When a fix is actually authorized and bench
-verified, append the exact root cause, diagnostic observations, final code change,
-before/after results under identical ESP settings, and the hardware reason that
-change removes the failure. Do not replace this record with a success claim or
-mark the issue resolved before those measurements exist.
+Historical note: the instruction above was current at the time of the diagnostic
+build. It was superseded by the later fix and hardware measurements in this
+record; the exact analogue pad transient remains unmeasured.
 
 
 ### This-pass verification
@@ -395,7 +393,7 @@ mark the issue resolved before those measurements exist.
 - No flash, commit, push, ESP change, scope test, transport fix, IRQ-priority
   change, or wiring change. Existing `pico-spi.log` is untouched.
 
-## Production correction — 2026-09-27; hardware acceptance pending
+## Production correction — reset storm; hardware-verified 2026-09-27
 
 ### Symptom and decisive measurements
 
@@ -435,6 +433,12 @@ gmis=0/0
 gpend=19/987732
 gcfg=0C/00000001
 ```
+
+The preceding measurement that first exposed the storm increased `reselect` from
+407198 to 819273 while completions increased from 588 to 1176: 412075 extra
+SPI1 resets across 588 new completions, roughly 700 per transaction. The three
+summaries above then captured the reset-window GPIO evidence in a separate
+instrumented run. Do not merge counts from those runs.
 
 ### Root cause and strength of evidence
 
@@ -527,8 +531,11 @@ so it was never sufficient proof of external clock activity.
 
 `prepare()` resets and configures SPI1 only after confirming CS high, at initial
 idle or following deselection. It clears stale TX/FIFO/partial-word state and
-leaves the peripheral enabled in slave mode, TX empty, interrupts masked. Empty
-TX must remain masked because its level interrupt can assert while idle.
+leaves the peripheral configured as a slave but disabled, TX empty and interrupts
+masked. Empty TX must remain masked because its level interrupt can assert while
+idle. At CS falling, eight TX entries are primed before SSE is enabled; details
+of the separately discovered first-byte alignment issue and its hardware result
+are recorded below.
 
 CS and SCK have permanent **output-enable** DISABLE overrides, not input
 inversions or disabled inputs. Even the reset default master interval cannot
@@ -581,13 +588,139 @@ code are unchanged; `pico-spi.log` retains SHA256
 `a68119d6be24f9cc991400dbf380f7f2ae6d2433186c544a57793e431040715e`.
 No flash, commit or push was performed.
 
-**Hardware verification pending — do not mark resolved yet.** Flash only as a
-separate operator step; keep the same ESP, wiring and polling. Collect at least
-three successive minute summaries plus corresponding ESP logs. Pico should show
-~588 further `tx` and `full` per minute, `short/extra/over/csfault` flat at zero
-from a clean boot, healthy qualification, and ~60 further sync emissions with
-no unexpected skipped boundaries. ESP should continuously receive CRC-valid
-ACT1 packets, advancing publication sequence (repeated sequences between
-publications are expected), qualify Pico as source, and maintain TIME_SYNC /
-phase association. No sustained BAD MAGIC/zero packets are acceptable after
-startup. Append those actual results here before claiming hardware success.
+**Historical acceptance plan (completed below).** At implementation time, the
+next test was expected to establish sustained full RX accounting and valid ACT1
+packets. The actual results appear in “Final hardware acceptance” below; the
+startup counters were nonzero and are preserved as measured.
+
+
+## Follow-up: TX begins one byte late (resolved on hardware)
+
+### Verified reset-storm correction
+
+The prior production lifecycle correction has now passed its first real hardware
+acceptance run, with unchanged ESP firmware, wiring, SPI mode/rate, protocol and
+polling behavior. Two consecutive Pico summaries were:
+
+```text
+tx=587 short=0 extra=0 over=0 full=587 csfault=0
+tx=1176 short=0 extra=0 over=0 full=1176 csfault=0
+```
+
+This verifies complete RX framing, no SHORT/extra/overrun/CS-fault counts, and no
+observed reset/reselect storm under the tested load. TIME_SYNC continues. This
+success is retained as a separate result; the TX alignment issue below is a new
+failure and does not undo that verification.
+
+### Symptom and evidence
+
+ESP now receives a coherent packet shifted one byte later: `00 41 43 54 31 01
+28 6F ...`, where ACT1 should begin `41 43 54 31`. It occurs consistently while
+Pico accounts for exactly 40 received bytes and reports no framing/error counts.
+ESP firmware is unchanged. The leading zero plus the following contiguous ACT1
+bytes is consistent with the slave's first transmitted frame being zero and the
+transaction payload beginning at the next frame. That establishes a TX alignment
+symptom; it does not, by itself, identify which SSP internal register stage
+supplied the zero.
+
+### Source and hardware analysis
+
+Before this follow-up, `prepare()` reset/reconfigured the SSP while deselected,
+then set CR1 to slave+SSE while leaving TX FIFO empty. The CS falling-edge handler
+later copied the immutable packet and filled up to eight FIFO entries, while SSE
+was already set. The RP2350 SSP transmit FIFO feeds a serial transmit path. Its
+TX output is separately tristated while a slave is deselected. The original code
+therefore permitted an enabled, empty transmitter to reach the active CS
+boundary before the transaction's first FIFO entries were written.
+
+The RP2350 datasheet, section 12.3.4.3, explicitly permits priming the TX FIFO
+with up to eight values while the PrimeCell SSP is disabled, then enabling the
+SSP. Section 12.3.1 describes the slave TX output tristate when deselected; the
+PL022 TRM describes SPH=1's first-edge/first-capture relationship. Together these
+support keeping the configured slave disabled with an empty FIFO while idle,
+then loading the new transaction before setting SSE. This prevents an empty
+preselection shifter state from preceding the packet. The exact prior internal
+source of the observed zero (shift register versus first selected edge before
+servicing) was not directly captured; this change removes that race by using the
+documented preload-before-enable sequence.
+
+### Narrow correction
+
+`prepare()` still resets and configures only while CS is high, preserving the
+verified reset-storm fix and deterministic FIFO/partial-word recovery. It now
+leaves CR1.MS=1 with SSE=0 while idle. On a clean falling edge, code latches the
+latest immutable packet, writes the same initial eight bytes while SSE is off,
+then sets CR1.SSE and enables the existing IRQ mask. The controller's existing
+100 us CS-to-first-clock setup interval remains in force. No reset occurs on the
+falling edge; OE clamps, explicit GPIO edge handling, IRQ priorities, mode,
+rate, packet construction and TIME_SYNC are untouched.
+
+Packet freshness remains snapshot-at-fall: the 40-byte packet is copied only
+when CS asserts, so preloading does not use a prior transaction's snapshot. The
+SSP's 8-entry FIFO is primed from that copy before enabling. Aborted/short/extra
+transactions still reset and clear in `prepare()` after deselection.
+
+### Verification status
+
+Host tests now assert the initial transaction's eight TX entries are written
+while SSE is clear and that SSE is set before the selected transaction proceeds.
+The complete host suite, `git diff --check`, and `pio run -e pico2 -j1` passed
+for this follow-up. The separate hardware result is recorded below; it must not
+be conflated with Issue 1.
+
+## Final hardware acceptance — both SPI failures resolved
+
+### Issue 1 result: reset/CS feedback storm
+
+The reset-storm root cause and lifecycle fix above were independently validated
+before the alignment follow-up. Two consecutive one-minute Pico summaries were:
+
+```text
+tx=587  short=0 extra=0 over=0 full=587  csfault=0
+tx=1176 short=0 extra=0 over=0 full=1176 csfault=0
+```
+
+This verified that the prior catastrophic SHORT/zero-response failure stopped:
+all completed transactions were full, no extras/overruns/CS faults were observed,
+and TIME_SYNC continued. This is the hardware result for Issue 1 only.
+
+### Issue 2 result: first-byte TX alignment
+
+After priming the FIFO with SSE disabled before enabling it, ESP observed correct
+byte-zero alignment and repeatedly validated Protocol-v1 packets:
+
+```text
+PICO: tx=1378 packet=VALID rx[0:8]=41 43 54 31 01 28 6F 00 ascii="ACT1.(o."
+PICO: tx=1427 packet=VALID rx[0:8]=41 43 54 31 01 28 6F 00 ...
+PICO: tx=1476 packet=VALID rx[0:8]=41 43 54 31 01 28 6F 00 ...
+```
+
+ESP UI/status reported the Pico responding and qualified as selected authority,
+UTC valid/locked, valid Pico packets, progressing packet/boundary/sync sequences,
+and successful phase association. TIME_SYNC continued. Thus the zero prefix is
+removed on hardware. The empty/stale first transmit stage remains the inferred
+mechanism; no internal shifter capture was made. The exact first-byte correction
+is separate from the reset-storm correction: Issue 1 fixed transaction survival;
+Issue 2 fixed TX frame alignment.
+
+Final Pico cumulative summaries (counts are **from boot**, so startup transients
+are included):
+
+```text
+NET ... tx=529  short=19 extra=0 over=0 full=510  csfault=95 sync=58  skipped=0
+NET ... tx=1105 short=19 extra=0 over=0 full=1086 csfault=95 sync=118 skipped=0
+NET ... tx=1683 short=19 extra=0 over=0 full=1664 csfault=95 sync=178 skipped=0
+```
+
+The first-to-second interval added 576 `tx` and 576 `full`; the second-to-third
+added 578 of each. `short` remained 19 and `csfault` remained 95 across both
+intervals; `extra` and `over` stayed zero. These were startup/bring-up events,
+not zero-from-boot results. In steady state, every additional completed
+transaction accounted for 40 RX bytes, with no continuing short, extra, overrun
+or CS-fault increments. `sync` advanced by 60 in each interval and `skipped`
+remained zero.
+
+The register/FIFO host model validated ordering and recovery. Actual ESP CRC,
+packet validity, source qualification, phase association and hardware counters
+outrank simulation for transport acceptance. The model did not reproduce the
+analogue reset transient or directly observe the SSP shift register.

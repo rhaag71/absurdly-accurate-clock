@@ -68,8 +68,9 @@ The companion [aac-time-bridge](https://github.com/rhaag71/aac-time-bridge) is a
 ESP32 network-time/NTP appliance that consumes the Pico's SPI protocol and
 qualified TIME_SYNC signal. The Pico remains the authoritative timekeeper and
 runs standalone without the ESP32. [Protocol v1](docs/clock-network-protocol.md)
-specifies the wiring, packet and phase-delay semantics; nothing received from the
-ESP32 can change Pico time.
+specifies the wiring, packet and phase-delay semantics, including the SPI reset
+and TX-priming lifecycle required for reliable byte alignment. Nothing received
+from the ESP32 can change Pico time.
 
 ## Unattended recovery
 
