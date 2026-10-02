@@ -3,6 +3,10 @@
 Minimal C++ firmware for Raspberry Pi Pico 2 (RP2350), using PlatformIO and
 Earle Philhower's Arduino-Pico core. Open this directory in PlatformIO.
 
+![Absurdly Accurate Clock development hardware](images/AAC-Real-Images-forGH.png)
+
+*Real AAC development hardware photographed during bring-up and testing.*
+
 ## Build
 
 ```sh
