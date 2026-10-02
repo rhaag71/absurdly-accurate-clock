@@ -5,7 +5,7 @@ Earle Philhower's Arduino-Pico core. Open this directory in PlatformIO.
 
 ![Absurdly Accurate Clock development hardware](images/AAC-Real-Images-forGH.png)
 
-*Real AAC development hardware photographed during bring-up and testing.*
+*Real AAC development hardware photographed during bring-up and testing; collage includes background cleanup and compositing.*
 
 ## Build
 
